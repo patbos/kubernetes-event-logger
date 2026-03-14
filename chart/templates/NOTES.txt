@@ -1,0 +1,7 @@
+1. kubernetes-event-logger is deployed with {{ .Values.replicaCount }} replica(s).
+
+{{- if gt (int .Values.replicaCount) 1 }}
+2. Leader election is active — only the elected leader will log events; standby replicas wait for failover.
+{{- end }}
+
+Logs are written as JSON to stdout. Collect them with your preferred log aggregation stack.

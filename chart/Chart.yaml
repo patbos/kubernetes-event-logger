@@ -1,0 +1,6 @@
+apiVersion: v2
+name: kubernetes-event-logger
+description: A lightweight Kubernetes event logger that watches cluster events and outputs them as JSON to stdout.
+type: application
+version: 0.1.0
+appVersion: "latest"
