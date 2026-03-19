@@ -3,4 +3,13 @@ name: kubernetes-event-logger
 description: A lightweight Kubernetes event logger that watches cluster events and outputs them as JSON to stdout.
 type: application
 version: 0.1.0
-appVersion: "latest"
+appVersion: "0.1.0"
+keywords:
+  - kubernetes
+  - events
+  - logging
+home: https://github.com/patbos/kubernetes-event-logger
+sources:
+  - https://github.com/patbos/kubernetes-event-logger
+maintainers:
+  - name: patbos
