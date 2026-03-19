@@ -45,6 +45,22 @@ resources:
     cpu: 500m
     memory: 512Mi
 
+port:
+  containerPort: 8080
+  name: metrics
+
+livenessProbe:
+  initialDelaySeconds: 10
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+readinessProbe:
+  initialDelaySeconds: 5
+  periodSeconds: 5
+  timeoutSeconds: 5
+  failureThreshold: 2
+
 nodeSelector: {}
 
 tolerations: []
@@ -76,3 +92,10 @@ leaderElection:
 podDisruptionBudget:
   enabled: true
   minAvailable: 1
+
+serviceMonitor:
+  enabled: false
+  interval: 30s
+  scrapeTimeout: 10s
+  labels: {}
+  relabelings: []
