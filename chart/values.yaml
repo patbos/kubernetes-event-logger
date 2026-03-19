@@ -1,3 +1,5 @@
+# Number of replicas. With replicaCount > 1, leader election is active.
+# Only the leader logs events; standby replicas wait for failover.
 replicaCount: 2
 
 image:
@@ -30,8 +32,18 @@ securityContext:
   capabilities:
     drop:
       - ALL
+  seccompProfile:
+    type: RuntimeDefault
 
-resources: {}
+# Resource requests and limits. The app has minimal footprint in standby mode.
+# Requests help the scheduler place pods; limits prevent resource exhaustion.
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
 
 nodeSelector: {}
 
@@ -39,7 +51,28 @@ tolerations: []
 
 affinity: {}
 
+priorityClassName: ""
+
+# Grace period for graceful shutdown. App handles SIGTERM/SIGINT.
+terminationGracePeriodSeconds: 30
+
+# Deployment strategy. RollingUpdate with maxUnavailable=0 ensures zero-downtime updates.
+# maxSurge=1 allows one extra pod during update to maintain capacity.
+strategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxSurge: 1
+    maxUnavailable: 0
+
+# Leader election configuration for high-availability deployments.
+# Only the leader processes events; others are in standby.
 leaderElection:
-  leaseDuration: 15s
-  renewDeadline: 10s
-  retryPeriod: 2s
+  leaseDuration: 15s      # Duration leader lease is valid
+  renewDeadline: 10s      # Time leader has to renew lease before losing it
+  retryPeriod: 2s         # Retry interval for acquiring/renewing lease
+
+# Pod Disruption Budget prevents voluntary disruptions from affecting availability.
+# Ensures at least minAvailable replicas remain during cluster maintenance.
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
