@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "kubernetes-event-logger.fullname" . }}
+  labels:
+    {{- include "kubernetes-event-logger.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+    - port: {{ .Values.port.containerPort }}
+      targetPort: {{ .Values.port.name }}
+      protocol: TCP
+      name: {{ .Values.port.name }}
+  selector:
+    {{- include "kubernetes-event-logger.selectorLabels" . | nindent 4 }}
