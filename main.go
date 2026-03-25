@@ -114,6 +114,8 @@ func main() {
 	leaseDuration := flag.Duration("lease-duration", 15*time.Second, "duration a leader lease is valid before another candidate can take over")
 	renewDeadline := flag.Duration("renew-deadline", 10*time.Second, "duration the leader has to renew the lease before losing it")
 	retryPeriod := flag.Duration("retry-period", 2*time.Second, "how often candidates retry acquiring or renewing the lease")
+	var excludeFilters eventFilters
+	flag.Var(&excludeFilters, "exclude-filter", "exclude events matching all clauses in a rule; repeatable, format: field=value[,field=value] with fields namespace,kind,name,reason,type,reporting-component,source-component")
 	flag.Parse()
 
 	loggerEvent := log.New(os.Stdout, "", 0)
@@ -181,7 +183,7 @@ func main() {
 				defer wg.Done()
 				leaderGauge.Set(1)
 				leaderElectionsTotal.Inc()
-				runInformer(ctx, clientset, loggerEvent)
+				runInformer(ctx, clientset, loggerEvent, excludeFilters)
 			},
 			OnStoppedLeading: func() {
 				leaderGauge.Set(0)
@@ -199,7 +201,7 @@ func main() {
 	wg.Wait()
 }
 
-func runInformer(ctx context.Context, clientset *kubernetes.Clientset, loggerEvent *log.Logger) {
+func runInformer(ctx context.Context, clientset *kubernetes.Clientset, loggerEvent *log.Logger, excludeFilters eventFilters) {
 	factory := informers.NewSharedInformerFactory(clientset, 0)
 	defer factory.Shutdown()
 	eventInformer := factory.Core().V1().Events().Informer()
@@ -207,30 +209,51 @@ func runInformer(ctx context.Context, clientset *kubernetes.Clientset, loggerEve
 	startTime := time.Now().UTC()
 	slog.Info("Became leader. Only logging events occurring after start time.", "start_time", startTime.Format(time.RFC3339))
 
+	type eventWithTime struct {
+		Time  time.Time       `json:"time"`
+		Level string          `json:"level"`
+		Event json.RawMessage `json:"event"`
+	}
+
+	logEvent := func(obj interface{}) {
+		start := time.Now()
+		event, ok := obj.(*v1.Event)
+		if !ok {
+			return
+		}
+		if isHistorical(event, startTime) {
+			eventsFilteredTotal.WithLabelValues("historical").Inc()
+			return
+		}
+		if excludeFilters.Match(event) {
+			eventsFilteredTotal.WithLabelValues("excluded_filter").Inc()
+			return
+		}
+		j, err := json.Marshal(obj)
+		if err != nil {
+			slog.Error("Failed to marshal event", "error", err)
+			eventsFailedTotal.WithLabelValues("marshal_error").Inc()
+			return
+		}
+		wrapper, err := json.Marshal(eventWithTime{Time: eventTime(event), Level: eventLevel(event.Type), Event: json.RawMessage(j)})
+		if err != nil {
+			slog.Error("Failed to marshal event wrapper", "error", err)
+			eventsFailedTotal.WithLabelValues("marshal_error").Inc()
+			return
+		}
+		loggerEvent.Printf("%s\n", string(wrapper))
+		eventsTotal.WithLabelValues(event.Type).Inc()
+		eventsByNamespaceTotal.WithLabelValues(event.InvolvedObject.Namespace).Inc()
+		eventsByReasonTotal.WithLabelValues(event.Reason).Inc()
+		eventsByObjectKindTotal.WithLabelValues(event.InvolvedObject.Kind).Inc()
+		lastEventTimestamp.SetToCurrentTime()
+		eventProcessingDuration.Observe(time.Since(start).Seconds())
+	}
+
 	_, err := eventInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc: func(obj interface{}) {
-			start := time.Now()
-			event, ok := obj.(*v1.Event)
-			if !ok {
-				return
-			}
-			if isHistorical(event, startTime) {
-				eventsFilteredTotal.WithLabelValues("historical").Inc()
-				return
-			}
-			j, err := json.Marshal(obj)
-			if err != nil {
-				slog.Error("Failed to marshal event", "error", err)
-				eventsFailedTotal.WithLabelValues("marshal_error").Inc()
-				return
-			}
-			loggerEvent.Printf("%s\n", string(j))
-			eventsTotal.WithLabelValues(event.Type).Inc()
-			eventsByNamespaceTotal.WithLabelValues(event.InvolvedObject.Namespace).Inc()
-			eventsByReasonTotal.WithLabelValues(event.Reason).Inc()
-			eventsByObjectKindTotal.WithLabelValues(event.InvolvedObject.Kind).Inc()
-			lastEventTimestamp.SetToCurrentTime()
-			eventProcessingDuration.Observe(time.Since(start).Seconds())
+		AddFunc: logEvent,
+		UpdateFunc: func(_, newObj interface{}) {
+			logEvent(newObj)
 		},
 	})
 	if err != nil {
@@ -254,15 +277,29 @@ func runInformer(ctx context.Context, clientset *kubernetes.Clientset, loggerEve
 	slog.Info("Shutting down.")
 }
 
+func eventTime(event *v1.Event) time.Time {
+	if !event.EventTime.IsZero() {
+		return event.EventTime.Time
+	}
+	if !event.LastTimestamp.IsZero() {
+		return event.LastTimestamp.Time
+	}
+	return event.FirstTimestamp.Time
+}
+
+func eventLevel(eventType string) string {
+	switch eventType {
+	case "Warning":
+		return "warn"
+	case "Normal":
+		return "info"
+	default:
+		return "debug"
+	}
+}
+
 func isHistorical(event *v1.Event, startTime time.Time) bool {
-	eventTs := event.EventTime.Time
-	if eventTs.IsZero() {
-		eventTs = event.LastTimestamp.Time
-	}
-	if eventTs.IsZero() {
-		eventTs = event.FirstTimestamp.Time
-	}
-	return !eventTs.UTC().After(startTime)
+	return !eventTime(event).UTC().After(startTime)
 }
 
 func getK8sConfig(kubeconfig string) (*rest.Config, error) {

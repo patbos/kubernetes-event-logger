@@ -37,8 +37,14 @@ To customise, override values:
 helm install kubernetes-event-logger oci://ghcr.io/patbos/kubernetes-event-logger \
   --version <version> \
   --set replicaCount=1 \
-  --set image.tag=v1.2.3
+  --set image.tag=v1.2.3 \
+  --set 'excludeFilters[0].kind=Node' \
+  --set 'excludeFilters[0].type=Normal' \
+  --set 'excludeFilters[1].namespace=kube-system' \
+  --set 'excludeFilters[1].reason=Scheduled'
 ```
+
+`excludeFilters` is a Helm list of rule objects. Each rule excludes events only when all configured fields match.
 
 Or with a values file:
 
@@ -48,6 +54,12 @@ replicaCount: 2
 
 image:
   tag: v1.2.3
+
+excludeFilters:
+  - kind: Node
+    type: Normal
+  - namespace: kube-system
+    reason: Scheduled
 
 resources:
   requests:
@@ -88,6 +100,12 @@ docker run -v ~/.kube/config:/config kubernetes-event-logger -kubeconfig=/config
 
 ## Configuration
 
+### Helm Values
+
+| Value | Description | Default |
+|---|---|---|
+| `excludeFilters` | List of event exclusion rules; all fields in a rule must match | `[]` |
+
 ### Command-line Flags
 
 | Flag | Description | Default |
@@ -96,6 +114,7 @@ docker run -v ~/.kube/config:/config kubernetes-event-logger -kubeconfig=/config
 | `-lease-duration` | Duration a leader lease is valid before another candidate can take over | `15s` |
 | `-renew-deadline` | Duration the leader has to renew the lease before losing it | `10s` |
 | `-retry-period` | How often candidates retry acquiring or renewing the lease | `2s` |
+| `-exclude-filter` | Exclude events matching all clauses in a rule; repeatable `field=value[,field=value]` | none |
 
 ### Environment Variables
 

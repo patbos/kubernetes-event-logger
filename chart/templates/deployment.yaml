@@ -48,6 +48,9 @@ spec:
             - -lease-duration={{ .Values.leaderElection.leaseDuration }}
             - -renew-deadline={{ .Values.leaderElection.renewDeadline }}
             - -retry-period={{ .Values.leaderElection.retryPeriod }}
+            {{- range .Values.excludeFilters }}
+            - -exclude-filter={{ include "kubernetes-event-logger.excludeFilter" . }}
+            {{- end }}
           env:
             - name: POD_NAMESPACE
               valueFrom:
