@@ -5,7 +5,7 @@ This repository is intentionally small. `main.go` contains the application entry
 
 ## Build, Test, and Development Commands
 - `go test ./...`: run the Go test suite. At present this verifies the module builds because there are no `_test.go` files yet.
-- `go build -o kubernetes-event-logger main.go`: build the local binary used in the README examples.
+- `go build -o kubernetes-event-logger .`: build the local binary used in the README examples.
 - `./kubernetes-event-logger -kubeconfig=/path/to/config`: run the logger against a cluster from your workstation.
 - `docker build -t kubernetes-event-logger .`: build the container image from the multi-stage `Dockerfile`.
 - `helm lint chart`: validate Helm chart structure before opening a PR.

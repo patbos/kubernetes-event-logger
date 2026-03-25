@@ -1,5 +1,7 @@
 # kubernetes-event-logger
 
+[![CI](https://github.com/patbos/kubernetes-event-logger/actions/workflows/ci.yml/badge.svg)](https://github.com/patbos/kubernetes-event-logger/actions/workflows/ci.yml)
+
 A lightweight Kubernetes event logger that watches cluster events and outputs them as JSON to stdout in real-time.
 
 ## Overview
@@ -79,7 +81,7 @@ helm install kubernetes-event-logger oci://ghcr.io/patbos/kubernetes-event-logge
 
 ```bash
 # Build the binary
-go build -o kubernetes-event-logger main.go
+go build -o kubernetes-event-logger .
 
 # Run with default kubeconfig (~/.kube/config)
 ./kubernetes-event-logger
@@ -251,7 +253,7 @@ Events are logged as JSON objects to stdout. Example output:
 ### Local Build
 
 ```bash
-go build -o kubernetes-event-logger main.go
+go build -o kubernetes-event-logger .
 ```
 
 ### Docker Build
