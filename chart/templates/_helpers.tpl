@@ -58,3 +58,29 @@ ServiceAccount name.
 {{- default "default" .Values.serviceAccount.name }}
 {{- end }}
 {{- end }}
+
+{{- define "kubernetes-event-logger.excludeFilter" -}}
+{{- $parts := list -}}
+{{- with .namespace -}}
+{{- $parts = append $parts (printf "namespace=%s" .) -}}
+{{- end -}}
+{{- with .kind -}}
+{{- $parts = append $parts (printf "kind=%s" .) -}}
+{{- end -}}
+{{- with .name -}}
+{{- $parts = append $parts (printf "name=%s" .) -}}
+{{- end -}}
+{{- with .reason -}}
+{{- $parts = append $parts (printf "reason=%s" .) -}}
+{{- end -}}
+{{- with .type -}}
+{{- $parts = append $parts (printf "type=%s" .) -}}
+{{- end -}}
+{{- with .reportingComponent -}}
+{{- $parts = append $parts (printf "reporting-component=%s" .) -}}
+{{- end -}}
+{{- with .sourceComponent -}}
+{{- $parts = append $parts (printf "source-component=%s" .) -}}
+{{- end -}}
+{{- join "," $parts -}}
+{{- end }}

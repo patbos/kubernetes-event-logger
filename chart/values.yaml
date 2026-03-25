@@ -87,6 +87,16 @@ leaderElection:
   renewDeadline: 10s      # Time leader has to renew lease before losing it
   retryPeriod: 2s         # Retry interval for acquiring/renewing lease
 
+# List of event exclusion rules.
+# Each rule excludes events only when all configured fields match.
+# Supported fields: namespace, kind, name, reason, type, reportingComponent, sourceComponent
+# Example:
+#   - kind: Node
+#     type: Normal
+#   - namespace: kube-system
+#     reason: Scheduled
+excludeFilters: []
+
 # Pod Disruption Budget prevents voluntary disruptions from affecting availability.
 # Ensures at least minAvailable replicas remain during cluster maintenance.
 podDisruptionBudget:
