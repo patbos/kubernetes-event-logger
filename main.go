@@ -328,11 +328,12 @@ func handleHealth(w http.ResponseWriter, r *http.Request) {
 	status := "healthy"
 	statusCode := http.StatusOK
 
-	// Liveness: pod is running if we're handling requests
-	// Readiness: pod is ready if cache is synced and we've become leader
-	isReady := cacheSynced && isLeader
+	// Liveness: pod is running if cache is synced (can serve or become leader)
+	// Readiness: pod is ready if cache is synced (doesn't require leadership)
+	// Non-leader pods are healthy and waiting to take over
+	isHealthy := cacheSynced
 
-	if !isReady {
+	if !isHealthy {
 		status = "not-ready"
 		statusCode = http.StatusServiceUnavailable
 	}
