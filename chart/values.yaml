@@ -4,7 +4,10 @@ replicaCount: 2
 
 image:
   repository: ghcr.io/patbos/kubernetes-event-logger
-  pullPolicy: IfNotPresent
+  # Always pull to ensure security patches are applied
+  # IfNotPresent: uses cached image (security risk if stale)
+  # Always: pulls from registry every time (slower but safer)
+  pullPolicy: Always
   # Overrides the image tag whose default is the chart appVersion.
   tag: ""
 
@@ -19,12 +22,25 @@ serviceAccount:
   name: ""
 
 podAnnotations: {}
-podLabels: {}
+
+# Pod Security Standards labels for Kubernetes 1.25+
+# Enforces restricted security standard at pod level
+# - enforce: rejects non-compliant pods
+# - audit: logs violations
+# - warn: displays warnings
+podLabels:
+  pod-security.kubernetes.io/enforce: restricted
+  pod-security.kubernetes.io/audit: restricted
+  pod-security.kubernetes.io/warn: restricted
 
 podSecurityContext:
   runAsNonRoot: true
   runAsUser: 65532
   runAsGroup: 65532
+  # File system group for mounted volumes
+  # Ensures non-root user can write to volumes (if added in future)
+  # No impact if no volumes are mounted
+  fsGroup: 65532
 
 securityContext:
   allowPrivilegeEscalation: false
@@ -65,7 +81,21 @@ nodeSelector: {}
 
 tolerations: []
 
-affinity: {}
+# Pod anti-affinity: spread replicas across nodes for better availability
+# If node fails, only one replica is lost (not all)
+affinity:
+  podAntiAffinity:
+    # Soft rule: prefer different nodes, but allow same node if needed
+    preferredDuringSchedulingIgnoredDuringExecution:
+    - weight: 100
+      podAffinityTerm:
+        labelSelector:
+          matchExpressions:
+          - key: app.kubernetes.io/name
+            operator: In
+            values:
+            - kubernetes-event-logger
+        topologyKey: kubernetes.io/hostname
 
 priorityClassName: ""
 
@@ -109,3 +139,25 @@ serviceMonitor:
   scrapeTimeout: 10s
   labels: {}
   relabelings: []
+
+# Network Policy: restrict traffic to/from the pod
+# Prevents lateral movement if pod is compromised
+# Requires cluster with network policy support (Calico, Cilium, etc)
+networkPolicy:
+  enabled: true
+  # Ingress: allow traffic from Prometheus for metrics scraping
+  ingress:
+    prometheus:
+      enabled: true
+      # Namespace selector for Prometheus (adjust to your setup)
+      namespaceSelector:
+        matchLabels:
+          name: prometheus
+  # Egress: allow DNS and Kubernetes API access
+  egress:
+    # Allow DNS queries (port 53 UDP)
+    dns:
+      enabled: true
+    # Allow Kubernetes API access (port 443 TCP to kube-system)
+    kubernetesAPI:
+      enabled: true
