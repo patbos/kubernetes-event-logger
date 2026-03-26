@@ -24,78 +24,78 @@ jobs:
       - name: Pin actions to commit SHAs
         run: |
           python3 << 'EOF'
-import re
-import subprocess
-import json
-import os
+          import re
+          import subprocess
+          import json
+          import os
 
-github_token = os.environ.get('GITHUB_TOKEN')
-workflows_dir = '.github/workflows'
+          github_token = os.environ.get('GITHUB_TOKEN')
+          workflows_dir = '.github/workflows'
 
-def get_action_sha(owner_repo, version_tag):
-    """Get commit SHA for a GitHub action version tag"""
-    try:
-      cmd = [
-        'gh', 'api',
-        f'repos/{owner_repo}/commits/{version_tag}',
-        '--jq', '.sha'
-      ]
-      result = subprocess.run(
-        cmd,
-        capture_output=True,
-        text=True,
-        timeout=10,
-        env={**os.environ, 'GITHUB_TOKEN': github_token}
-      )
-      sha = result.stdout.strip()
-      if sha and len(sha) == 40:
-        return sha
-    except Exception as e:
-      print(f'  ⚠️  Could not get SHA for {owner_repo}@{version_tag}: {e}')
-    return None
+          def get_action_sha(owner_repo, version_tag):
+              """Get commit SHA for a GitHub action version tag"""
+              try:
+                cmd = [
+                  'gh', 'api',
+                  f'repos/{owner_repo}/commits/{version_tag}',
+                  '--jq', '.sha'
+                ]
+                result = subprocess.run(
+                  cmd,
+                  capture_output=True,
+                  text=True,
+                  timeout=10,
+                  env={**os.environ, 'GITHUB_TOKEN': github_token}
+                )
+                sha = result.stdout.strip()
+                if sha and len(sha) == 40:
+                  return sha
+              except Exception as e:
+                print(f'  ⚠️  Could not get SHA for {owner_repo}@{version_tag}: {e}')
+              return None
 
-# Find all workflow files
-import glob
-workflows = glob.glob(f'{workflows_dir}/**/*.yml', recursive=True) + \
-           glob.glob(f'{workflows_dir}/**/*.yaml', recursive=True)
+          # Find all workflow files
+          import glob
+          workflows = glob.glob(f'{workflows_dir}/**/*.yml', recursive=True) + \
+                     glob.glob(f'{workflows_dir}/**/*.yaml', recursive=True)
 
-total_updated = 0
+          total_updated = 0
 
-for workflow_file in workflows:
-  with open(workflow_file, 'r') as f:
-    content = f.read()
+          for workflow_file in workflows:
+            with open(workflow_file, 'r') as f:
+              content = f.read()
 
-  original_content = content
+            original_content = content
 
-  # Pattern: uses: owner/repo@vX.Y.Z (with or without comments)
-  pattern = r'uses:\s+([a-zA-Z0-9\-_.]+/[a-zA-Z0-9\-_.]+)@v(\d+\.\d+\.\d+)(?:\s+#.*)?'
+            # Pattern: uses: owner/repo@vX.Y.Z (with or without comments)
+            pattern = r'uses:\s+([a-zA-Z0-9\-_.]+/[a-zA-Z0-9\-_.]+)@v(\d+\.\d+\.\d+)(?:\s+#.*)?'
 
-  def replace_with_sha(match):
-    action = match.group(1)
-    version = match.group(2)
-    version_tag = f'v{version}'
+            def replace_with_sha(match):
+              action = match.group(1)
+              version = match.group(2)
+              version_tag = f'v{version}'
 
-    print(f'  Checking {action}@{version_tag}...', end=' ')
+              print(f'  Checking {action}@{version_tag}...', end=' ')
 
-    sha = get_action_sha(action, version_tag)
-    if sha:
-      print(f'✓ {sha[:7]}...')
-      return f'uses: {action}@{sha}  # {version_tag}'
-    else:
-      print('⊘ keeping version tag')
-      return match.group(0)
+              sha = get_action_sha(action, version_tag)
+              if sha:
+                print(f'✓ {sha[:7]}...')
+                return f'uses: {action}@{sha}  # {version_tag}'
+              else:
+                print('⊘ keeping version tag')
+                return match.group(0)
 
-  content = re.sub(pattern, replace_with_sha, content)
+            content = re.sub(pattern, replace_with_sha, content)
 
-  if content != original_content:
-    with open(workflow_file, 'w') as f:
-      f.write(content)
-    print(f'✅ Updated {workflow_file}')
-    total_updated += 1
-  else:
-    print(f'✓ {workflow_file} already pinned or no changes needed')
+            if content != original_content:
+              with open(workflow_file, 'w') as f:
+                f.write(content)
+              print(f'✅ Updated {workflow_file}')
+              total_updated += 1
+            else:
+              print(f'✓ {workflow_file} already pinned or no changes needed')
 
-print(f'\n📊 Total files updated: {total_updated}')
+          print(f'\n📊 Total files updated: {total_updated}')
           EOF
 
       - name: Check for changes

@@ -167,6 +167,23 @@ func main() {
 	}()
 	defer srv.Shutdown(context.Background())
 
+	// Sync cache for all pods (leader and standby) before leader election
+	factory := informers.NewSharedInformerFactory(clientset, 0)
+	eventInformer := factory.Core().V1().Events().Informer()
+	factory.Start(ctx.Done())
+	slog.Info("Waiting for informer caches to sync...")
+	syncStart := time.Now()
+	if ok := cache.WaitForCacheSync(ctx.Done(), eventInformer.HasSynced); !ok {
+		slog.Error("Failed to wait for caches to sync")
+		os.Exit(1)
+	}
+	informerCacheSyncDuration.Set(time.Since(syncStart).Seconds())
+	healthState.Lock()
+	healthState.cacheSynced = true
+	healthState.Unlock()
+	slog.Info("Caches synced. Ready for event processing...")
+	defer factory.Shutdown()
+
 	var wg sync.WaitGroup
 	var lastLeader string
 	wg.Add(1)
@@ -191,8 +208,7 @@ func main() {
 				healthState.Lock()
 				healthState.isLeader = false
 				healthState.Unlock()
-				slog.Info("Lost leadership, shutting down.")
-				cancel()
+				slog.Info("Lost leadership, entering standby mode.")
 			},
 			OnNewLeader: func(identity string) {
 				if identity != id && identity != lastLeader {
@@ -206,12 +222,8 @@ func main() {
 }
 
 func runInformer(ctx context.Context, clientset *kubernetes.Clientset, loggerEvent *log.Logger, excludeFilters eventFilters) {
-	factory := informers.NewSharedInformerFactory(clientset, 0)
-	defer factory.Shutdown()
-	eventInformer := factory.Core().V1().Events().Informer()
-
 	startTime := time.Now().UTC()
-	slog.Info("Became leader. Only logging events occurring after start time.", "start_time", startTime.Format(time.RFC3339))
+	slog.Info("Became leader. Starting to process events.", "start_time", startTime.Format(time.RFC3339))
 
 	type eventWithTime struct {
 		Time  time.Time       `json:"time"`
@@ -251,6 +263,11 @@ func runInformer(ctx context.Context, clientset *kubernetes.Clientset, loggerEve
 		eventProcessingDuration.Observe(time.Since(start).Seconds())
 	}
 
+	// Use the informer that was already started and synced in main()
+	factory := informers.NewSharedInformerFactory(clientset, 0)
+	defer factory.Shutdown()
+	eventInformer := factory.Core().V1().Events().Informer()
+
 	_, err := eventInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: logEvent,
 		UpdateFunc: func(_, newObj interface{}) {
@@ -262,23 +279,11 @@ func runInformer(ctx context.Context, clientset *kubernetes.Clientset, loggerEve
 		os.Exit(1)
 	}
 
-	slog.Info("Starting event informer...")
 	factory.Start(ctx.Done())
 
-	slog.Info("Waiting for informer caches to sync...")
-	syncStart := time.Now()
-	if ok := cache.WaitForCacheSync(ctx.Done(), eventInformer.HasSynced); !ok {
-		slog.Error("Failed to wait for caches to sync")
-		os.Exit(1)
-	}
-	informerCacheSyncDuration.Set(time.Since(syncStart).Seconds())
-	healthState.Lock()
-	healthState.cacheSynced = true
-	healthState.Unlock()
-	slog.Info("Caches synced. Listening for new events...")
-
+	// Cache is already synced in main(), just wait for leadership to end
 	<-ctx.Done()
-	slog.Info("Shutting down.")
+	slog.Info("Shutting down event processing.")
 }
 
 func eventTime(event *v1.Event) time.Time {
