@@ -54,7 +54,7 @@ jobs:
             org.opencontainers.image.source=${{ github.event.pull_request.html_url }}
 
       - name: Comment on PR
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           script: |
             github.rest.issues.createComment({
