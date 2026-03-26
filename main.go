@@ -38,9 +38,9 @@ var version = "dev"
 var (
 	healthState = struct {
 		sync.RWMutex
-		isLeader     bool
-		cacheSynced  bool
-		startTime    time.Time
+		isLeader    bool
+		cacheSynced bool
+		startTime   time.Time
 	}{
 		startTime: time.Now(),
 	}
@@ -338,11 +338,11 @@ func handleHealth(w http.ResponseWriter, r *http.Request) {
 	}
 
 	response := map[string]interface{}{
-		"status":        status,
-		"leader":        isLeader,
-		"cache_synced":  cacheSynced,
+		"status":         status,
+		"leader":         isLeader,
+		"cache_synced":   cacheSynced,
 		"uptime_seconds": uptime,
-		"version":       version,
+		"version":        version,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
