@@ -59,9 +59,9 @@ spec:
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           livenessProbe:
-            {{- include "kubernetes-event-logger.tcpProbe" (dict "config" .Values.livenessProbe "port" .Values.port.name) | nindent 12 }}
+            {{- include "kubernetes-event-logger.httpProbe" (dict "config" .Values.livenessProbe "port" .Values.port.containerPort "path" "/health") | nindent 12 }}
           readinessProbe:
-            {{- include "kubernetes-event-logger.tcpProbe" (dict "config" .Values.readinessProbe "port" .Values.port.name) | nindent 12 }}
+            {{- include "kubernetes-event-logger.httpProbe" (dict "config" .Values.readinessProbe "port" .Values.port.containerPort "path" "/health") | nindent 12 }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

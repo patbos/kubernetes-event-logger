@@ -34,6 +34,18 @@ import (
 
 var version = "dev"
 
+// Health state tracking
+var (
+	healthState = struct {
+		sync.RWMutex
+		isLeader     bool
+		cacheSynced  bool
+		startTime    time.Time
+	}{
+		startTime: time.Now(),
+	}
+)
+
 var (
 	eventsTotal = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
@@ -67,18 +79,6 @@ var (
 		Help:    "Time taken to process (marshal and log) a single event.",
 		Buckets: prometheus.DefBuckets,
 	})
-	eventsByNamespaceTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
-		Name: "kubernetes_event_logger_events_by_namespace_total",
-		Help: "Total number of events logged, broken down by namespace.",
-	}, []string{"namespace"})
-	eventsByReasonTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
-		Name: "kubernetes_event_logger_events_by_reason_total",
-		Help: "Total number of events logged, broken down by reason.",
-	}, []string{"reason"})
-	eventsByObjectKindTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
-		Name: "kubernetes_event_logger_events_by_object_kind_total",
-		Help: "Total number of events logged, broken down by involved object kind.",
-	}, []string{"object_kind"})
 	informerCacheSyncDuration = prometheus.NewGauge(prometheus.GaugeOpts{
 		Name: "kubernetes_event_logger_informer_cache_sync_duration_seconds",
 		Help: "Time taken for the informer cache to sync on startup (seconds).",
@@ -94,9 +94,6 @@ func init() {
 		eventsFilteredTotal,
 		eventsFailedTotal,
 		eventProcessingDuration,
-		eventsByNamespaceTotal,
-		eventsByReasonTotal,
-		eventsByObjectKindTotal,
 		informerCacheSyncDuration,
 	)
 }
@@ -161,6 +158,7 @@ func main() {
 
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", promhttp.Handler())
+	mux.HandleFunc("/health", handleHealth)
 	srv := &http.Server{Addr: ":8080", Handler: mux}
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -182,11 +180,17 @@ func main() {
 			OnStartedLeading: func(ctx context.Context) {
 				defer wg.Done()
 				leaderGauge.Set(1)
+				healthState.Lock()
+				healthState.isLeader = true
+				healthState.Unlock()
 				leaderElectionsTotal.Inc()
 				runInformer(ctx, clientset, loggerEvent, excludeFilters)
 			},
 			OnStoppedLeading: func() {
 				leaderGauge.Set(0)
+				healthState.Lock()
+				healthState.isLeader = false
+				healthState.Unlock()
 				slog.Info("Lost leadership, shutting down.")
 				cancel()
 			},
@@ -243,9 +247,6 @@ func runInformer(ctx context.Context, clientset *kubernetes.Clientset, loggerEve
 		}
 		loggerEvent.Printf("%s\n", string(wrapper))
 		eventsTotal.WithLabelValues(event.Type).Inc()
-		eventsByNamespaceTotal.WithLabelValues(event.InvolvedObject.Namespace).Inc()
-		eventsByReasonTotal.WithLabelValues(event.Reason).Inc()
-		eventsByObjectKindTotal.WithLabelValues(event.InvolvedObject.Kind).Inc()
 		lastEventTimestamp.SetToCurrentTime()
 		eventProcessingDuration.Observe(time.Since(start).Seconds())
 	}
@@ -271,6 +272,9 @@ func runInformer(ctx context.Context, clientset *kubernetes.Clientset, loggerEve
 		os.Exit(1)
 	}
 	informerCacheSyncDuration.Set(time.Since(syncStart).Seconds())
+	healthState.Lock()
+	healthState.cacheSynced = true
+	healthState.Unlock()
 	slog.Info("Caches synced. Listening for new events...")
 
 	<-ctx.Done()
@@ -311,4 +315,37 @@ func getK8sConfig(kubeconfig string) (*rest.Config, error) {
 		}
 	}
 	return config, nil
+}
+
+func handleHealth(w http.ResponseWriter, r *http.Request) {
+	healthState.RLock()
+	isLeader := healthState.isLeader
+	cacheSynced := healthState.cacheSynced
+	uptime := time.Since(healthState.startTime).Seconds()
+	healthState.RUnlock()
+
+	// Determine overall health status
+	status := "healthy"
+	statusCode := http.StatusOK
+
+	// Liveness: pod is running if we're handling requests
+	// Readiness: pod is ready if cache is synced and we've become leader
+	isReady := cacheSynced && isLeader
+
+	if !isReady {
+		status = "not-ready"
+		statusCode = http.StatusServiceUnavailable
+	}
+
+	response := map[string]interface{}{
+		"status":        status,
+		"leader":        isLeader,
+		"cache_synced":  cacheSynced,
+		"uptime_seconds": uptime,
+		"version":       version,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(statusCode)
+	json.NewEncoder(w).Encode(response)
 }

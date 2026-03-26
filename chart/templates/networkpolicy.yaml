@@ -1,0 +1,49 @@
+{{- if .Values.networkPolicy.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "kubernetes-event-logger.fullname" . }}
+  labels:
+    {{- include "kubernetes-event-logger.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "kubernetes-event-logger.selectorLabels" . | nindent 6 }}
+  policyTypes:
+  - Ingress
+  - Egress
+
+  # Ingress: Allow traffic from Prometheus for metrics scraping
+  ingress:
+  {{- if .Values.networkPolicy.ingress.prometheus.enabled }}
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          {{- toYaml .Values.networkPolicy.ingress.prometheus.namespaceSelector.matchLabels | nindent 12 }}
+    ports:
+    - protocol: TCP
+      port: {{ .Values.port.containerPort }}
+  {{- end }}
+
+  # Egress: Allow DNS queries and Kubernetes API access
+  egress:
+  {{- if .Values.networkPolicy.egress.dns.enabled }}
+  # Allow DNS (UDP port 53) to any destination
+  - to:
+    - namespaceSelector: {}
+    ports:
+    - protocol: UDP
+      port: 53
+  {{- end }}
+
+  {{- if .Values.networkPolicy.egress.kubernetesAPI.enabled }}
+  # Allow HTTPS (TCP port 443) to kube-system namespace (API server)
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: kube-system
+    ports:
+    - protocol: TCP
+      port: 443
+  {{- end }}
+{{- end }}

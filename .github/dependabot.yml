@@ -1,7 +1,36 @@
 version: 2
 updates:
+  # Go module dependency updates
   - package-ecosystem: gomod
     directory: /
     schedule:
       interval: daily
+    # Open PR for each update (don't batch)
+    open-pull-requests-limit: 10
+    reviewers:
+      - patbos
+    commit-message:
+      prefix: "deps"
+      include: "scope"
+
+  # Docker base image updates
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+    # Check base image for security updates
+    open-pull-requests-limit: 5
+
+  # GitHub Actions version updates
+  # Uses commit SHA pinning for maximum security
+  # Dependabot automatically converts v3 → commit SHA
+  # and updates SHAs when new versions are released
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    # Convert version tags to commit SHAs (highest security)
+    # Dependabot will keep SHAs updated automatically
+    versioning-strategy: commit-sha
 
