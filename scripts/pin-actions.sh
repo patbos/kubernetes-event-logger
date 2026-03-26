@@ -43,7 +43,8 @@ def get_action_sha(owner_repo, version_tag):
         cmd,
         capture_output=True,
         text=True,
-        timeout=10
+        timeout=10,
+        env=os.environ
       )
       sha = result.stdout.strip()
       if sha and len(sha) == 40:
@@ -57,13 +58,12 @@ with open(workflow_file, 'r') as f:
 
 original_content = content
 
-# Find uses: owner/repo@vX.Y.Z patterns
-pattern = r'uses:\s+([a-zA-Z0-9\-_.]+/[a-zA-Z0-9\-_.]+)@v(\d+\.\d+\.\d+)(?:\s+#.*)?'
+# Find uses: owner/repo@vX.Y.Z or vX.Y or vX patterns
+pattern = r'uses:\s+([a-zA-Z0-9\-_.]+/[a-zA-Z0-9\-_.]+)@(v\d+(?:\.\d+)*)(?:\s+#.*)?'
 
 def replace_with_sha(match):
   action = match.group(1)
-  version = match.group(2)
-  version_tag = f'v{version}'
+  version_tag = match.group(2)  # Already includes 'v'
 
   print(f'  {action}@{version_tag}...', end=' ', flush=True)
 
