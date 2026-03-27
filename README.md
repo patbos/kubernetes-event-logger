@@ -2,60 +2,65 @@
 
 [![CI](https://github.com/patbos/kubernetes-event-logger/actions/workflows/ci.yml/badge.svg)](https://github.com/patbos/kubernetes-event-logger/actions/workflows/ci.yml)
 
-A lightweight Kubernetes event logger that watches cluster events and outputs them as JSON to stdout in real-time.
+A lightweight Kubernetes event logger that watches cluster events and writes new events as JSON to stdout.
 
 ## Overview
 
-This tool connects to a Kubernetes cluster and continuously monitors events, logging them as JSON for easy integration with log aggregation systems like CloudWatch, Elasticsearch, or other logging platforms. It filters out historical events and only logs events that occur after the application starts.
+`kubernetes-event-logger` watches `core/v1` `Event` resources across the cluster and emits them in a log-friendly JSON envelope. It ignores historical events that already existed before the active leader began processing, supports repeated exclusion rules, and exposes Prometheus metrics plus an HTTP health endpoint on port `8080`.
+
+The binary is intended to run either:
+
+- in-cluster as a Deployment, typically with `replicaCount > 1` and leader election enabled
+- locally with a kubeconfig for development or troubleshooting
 
 ## Features
 
-- Real-time Kubernetes event monitoring
-- JSON-formatted output for easy parsing
-- Filters out historical events (only logs new events after startup)
-- Works both in-cluster and locally with kubeconfig
-- Graceful shutdown handling (SIGINT/SIGTERM)
-- Lightweight distroless container image
-- Multi-architecture support (`linux/amd64` and `linux/arm64`)
-- Leader election for high-availability deployments (active/standby)
+- Cluster-wide Kubernetes event watching
+- JSON output to stdout for log shipping pipelines
+- Historical event suppression on startup and leader transitions
+- Repeatable event exclusion filters
+- In-cluster and kubeconfig-based authentication
+- Leader election for active/standby deployments
+- Prometheus metrics at `/metrics`
+- HTTP health endpoint at `/health`
+- Distroless container image
+- Helm chart with RBAC, probes, PDB, Service, optional ServiceMonitor, and optional NetworkPolicy
 
 ## Requirements
 
-- Go 1.24+ (for building from source)
+- Go `1.24+` to build from source
 - Access to a Kubernetes cluster
-- Appropriate RBAC permissions to read events
+- RBAC permission to read `events`
+- RBAC permission to manage a `Lease` in the deployment namespace for leader election
 
-## Usage
+## Installation
 
-### Helm (Kubernetes)
+### Helm
 
 ```bash
 helm install kubernetes-event-logger oci://ghcr.io/patbos/kubernetes-event-logger --version <version>
 ```
 
-To customise, override values:
+Override values inline:
 
 ```bash
 helm install kubernetes-event-logger oci://ghcr.io/patbos/kubernetes-event-logger \
   --version <version> \
-  --set replicaCount=1 \
-  --set image.tag=v1.2.3 \
+  --set replicaCount=2 \
+  --set image.tag=v0.2.2 \
   --set 'excludeFilters[0].kind=Node' \
   --set 'excludeFilters[0].type=Normal' \
   --set 'excludeFilters[1].namespace=kube-system' \
   --set 'excludeFilters[1].reason=Scheduled'
 ```
 
-`excludeFilters` is a Helm list of rule objects. Each rule excludes events only when all configured fields match.
-
-Or with a values file:
+Or use a values file:
 
 ```yaml
-# my-values.yaml
 replicaCount: 2
 
 image:
-  tag: v1.2.3
+  tag: v0.2.2
 
 excludeFilters:
   - kind: Node
@@ -63,12 +68,16 @@ excludeFilters:
   - namespace: kube-system
     reason: Scheduled
 
+serviceMonitor:
+  enabled: true
+
 resources:
   requests:
-    cpu: 10m
-    memory: 32Mi
-  limits:
+    cpu: 50m
     memory: 64Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
 ```
 
 ```bash
@@ -77,193 +86,220 @@ helm install kubernetes-event-logger oci://ghcr.io/patbos/kubernetes-event-logge
   -f my-values.yaml
 ```
 
-### Running Locally
+### Local Binary
 
 ```bash
-# Build the binary
 go build -o kubernetes-event-logger .
-
-# Run with default kubeconfig (~/.kube/config)
 ./kubernetes-event-logger
+```
 
-# Run with custom kubeconfig path
+Use a specific kubeconfig:
+
+```bash
 ./kubernetes-event-logger -kubeconfig=/path/to/kubeconfig
 ```
 
-### Using Docker
+### Docker
 
 ```bash
-# Build the image
 docker build -t kubernetes-event-logger .
-
-# Run with local kubeconfig
-docker run -v ~/.kube/config:/config kubernetes-event-logger -kubeconfig=/config
+docker run -v ~/.kube/config:/config:ro kubernetes-event-logger -kubeconfig=/config
 ```
 
 ## Configuration
 
-### Helm Values
+### Authentication
 
-| Value | Description | Default |
-|---|---|---|
-| `excludeFilters` | List of event exclusion rules; all fields in a rule must match | `[]` |
+The binary first tries the supplied kubeconfig path. If that fails, it falls back to in-cluster configuration.
+
+- Default `-kubeconfig`: `~/.kube/config` when a home directory is available
+- In Kubernetes, set `POD_NAMESPACE` from `metadata.namespace` so leader election uses the correct namespace
 
 ### Command-line Flags
 
 | Flag | Description | Default |
 |---|---|---|
-| `-kubeconfig` | Path to kubeconfig file | `~/.kube/config` |
-| `-lease-duration` | Duration a leader lease is valid before another candidate can take over | `15s` |
-| `-renew-deadline` | Duration the leader has to renew the lease before losing it | `10s` |
-| `-retry-period` | How often candidates retry acquiring or renewing the lease | `2s` |
-| `-exclude-filter` | Exclude events matching all clauses in a rule; repeatable `field=value[,field=value]` | none |
+| `-kubeconfig` | Path to kubeconfig file; falls back to in-cluster config if loading fails | `~/.kube/config` |
+| `-lease-duration` | Duration a leader lease remains valid | `15s` |
+| `-renew-deadline` | Time the leader has to renew the lease | `10s` |
+| `-retry-period` | Retry interval for acquiring or renewing the lease | `2s` |
+| `-exclude-filter` | Exclude events matching all clauses in one rule; repeatable | none |
+
+`-exclude-filter` syntax:
+
+```text
+field=value[,field=value]
+```
+
+Supported filter fields:
+
+- `namespace`
+- `kind`
+- `name`
+- `reason`
+- `type`
+- `reporting-component`
+- `reporting-controller`
+- `source-component`
+
+Example:
+
+```bash
+./kubernetes-event-logger \
+  -exclude-filter=kind=Node,type=Normal \
+  -exclude-filter=namespace=kube-system,reason=Scheduled
+```
+
+Each filter rule is AND-matched internally, and the full rule set is OR-matched across rules.
 
 ### Environment Variables
-
-The application automatically detects whether it's running in-cluster or locally:
-- When running in a Kubernetes pod, it uses the in-cluster configuration
-- When running locally, it uses the kubeconfig file
 
 | Variable | Description | Default |
 |---|---|---|
 | `POD_NAMESPACE` | Namespace used for the leader election `Lease` object | `default` |
 
-## High Availability (Leader Election)
+### Helm Values
 
-The application supports running with multiple replicas using Kubernetes leader election. Only the elected leader processes and logs events; the standby replica waits and takes over automatically if the leader dies.
+Common chart values:
 
-To run with 2 replicas, set `replicas: 2` in your Deployment. The pods use their hostname (pod name) as a unique identity and coordinate via a `Lease` object named `kubernetes-event-logger` in the namespace specified by `POD_NAMESPACE`.
+| Value | Description | Default |
+|---|---|---|
+| `replicaCount` | Number of pods to run; leader election ensures only one actively processes events | `2` |
+| `image.repository` | Container image repository | `ghcr.io/patbos/kubernetes-event-logger` |
+| `image.tag` | Image tag; falls back to chart `appVersion` | `""` |
+| `image.pullPolicy` | Image pull policy | `Always` |
+| `excludeFilters` | List of event exclusion rules | `[]` |
+| `leaderElection.leaseDuration` | Leader lease duration | `15s` |
+| `leaderElection.renewDeadline` | Lease renew deadline | `10s` |
+| `leaderElection.retryPeriod` | Lease retry interval | `2s` |
+| `serviceMonitor.enabled` | Create a Prometheus Operator `ServiceMonitor` | `false` |
+| `networkPolicy.enabled` | Create a `NetworkPolicy` for metrics ingress and DNS/API egress | `true` |
+| `podDisruptionBudget.enabled` | Create a PodDisruptionBudget | `true` |
+| `resources` | Pod resource requests and limits | see [`chart/values.yaml`](chart/values.yaml) |
 
-> **Note:** During a leadership transition, a small number of events may be logged twice — once by the old leader before it lost the lease, and again by the new leader after it takes over. This is inherent to the at-least-once delivery model and should be accounted for in downstream log processing.
+See [`chart/values.yaml`](chart/values.yaml) for the full chart surface, including probes, affinity, tolerations, security context, and ServiceMonitor labels.
 
-### Required RBAC
+## High Availability
 
-The application needs two sets of permissions:
-- **ClusterRole** to read `events` across all namespaces
-- **Role** (namespaced) to manage the leader election `Lease` object
+Leader election is always used. Only the current leader processes and logs events; standby replicas wait for failover.
 
-```yaml
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: kubernetes-event-logger
-  namespace: default
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: kubernetes-event-logger
-rules:
-  - apiGroups: [""]
-    resources: ["events"]
-    verbs: ["get", "list", "watch"]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: kubernetes-event-logger
-subjects:
-  - kind: ServiceAccount
-    name: kubernetes-event-logger
-    namespace: default
-roleRef:
-  kind: ClusterRole
-  name: kubernetes-event-logger
-  apiGroup: rbac.authorization.k8s.io
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
-metadata:
-  name: kubernetes-event-logger-leaderelection
-  namespace: default
-rules:
-  - apiGroups: ["coordination.k8s.io"]
-    resources: ["leases"]
-    verbs: ["get", "create", "update"]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: kubernetes-event-logger-leaderelection
-  namespace: default
-subjects:
-  - kind: ServiceAccount
-    name: kubernetes-event-logger
-    namespace: default
-roleRef:
-  kind: Role
-  name: kubernetes-event-logger-leaderelection
-  apiGroup: rbac.authorization.k8s.io
-```
+The leader election `Lease`:
 
-### Example Deployment
+- is named `kubernetes-event-logger`
+- lives in the namespace from `POD_NAMESPACE`
+- uses the pod hostname as the holder identity
 
-```yaml
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: kubernetes-event-logger
-spec:
-  replicas: 2
-  selector:
-    matchLabels:
-      app: kubernetes-event-logger
-  template:
-    metadata:
-      labels:
-        app: kubernetes-event-logger
-    spec:
-      serviceAccountName: kubernetes-event-logger
-      containers:
-        - name: kubernetes-event-logger
-          image: kubernetes-event-logger:latest
-          env:
-            - name: POD_NAMESPACE
-              valueFrom:
-                fieldRef:
-                  fieldPath: metadata.namespace
-```
+During failover or rollout, some events can be logged twice. Downstream consumers should treat the stream as at-least-once.
 
-## Output Format
+## RBAC
 
-Events are logged as JSON objects to stdout. Example output:
+The application needs:
+
+- a cluster-scoped permission set to `get`, `list`, and `watch` `events`
+- a namespaced permission set to `get`, `create`, and `update` `leases` in `coordination.k8s.io`
+
+The bundled Helm chart creates the required ServiceAccount, ClusterRole, ClusterRoleBinding, Role, and RoleBinding resources.
+
+## HTTP Endpoints
+
+The process listens on port `8080`.
+
+| Path | Purpose |
+|---|---|
+| `/metrics` | Prometheus metrics |
+| `/health` | JSON liveness/readiness response |
+
+Example `/health` response:
 
 ```json
 {
-  "metadata": {
-    "name": "pod-example.17a1b2c3d4e5f6",
-    "namespace": "default",
-    "creationTimestamp": "2025-11-23T15:00:00Z"
-  },
-  "involvedObject": {
-    "kind": "Pod",
-    "namespace": "default",
-    "name": "example-pod"
-  },
-  "reason": "Started",
-  "message": "Started container app",
-  "type": "Normal",
-  "firstTimestamp": "2025-11-23T15:00:00Z",
-  "lastTimestamp": "2025-11-23T15:00:00Z"
+  "status": "healthy",
+  "leader": true,
+  "cache_synced": true,
+  "uptime_seconds": 42.7,
+  "version": "dev"
 }
 ```
 
-## Building
+`/health` returns HTTP `503` until informer cache sync completes. Non-leader replicas still report healthy once synced because they are ready to take over.
 
-### Local Build
+## Metrics
+
+Prometheus metrics currently exposed at `/metrics`:
+
+- `kubernetes_event_logger_events_total`
+- `kubernetes_event_logger_events_filtered_total`
+- `kubernetes_event_logger_events_failed_total`
+- `kubernetes_event_logger_event_processing_duration_seconds`
+- `kubernetes_event_logger_last_event_processed_timestamp_seconds`
+- `kubernetes_event_logger_leader`
+- `kubernetes_event_logger_leader_elections_total`
+- `kubernetes_event_logger_informer_cache_sync_duration_seconds`
+
+## Output Format
+
+Each log line is a JSON object with:
+
+- `time`: event timestamp chosen from `eventTime`, `lastTimestamp`, or `firstTimestamp`
+- `level`: derived from event type (`Warning` -> `warn`, `Normal` -> `info`, other values -> `debug`)
+- `event`: the original Kubernetes event object
+
+Example:
+
+```json
+{
+  "time": "2025-11-23T15:00:00Z",
+  "level": "info",
+  "event": {
+    "metadata": {
+      "name": "pod-example.17a1b2c3d4e5f6",
+      "namespace": "default",
+      "creationTimestamp": "2025-11-23T15:00:00Z"
+    },
+    "involvedObject": {
+      "kind": "Pod",
+      "namespace": "default",
+      "name": "example-pod"
+    },
+    "reason": "Started",
+    "message": "Started container app",
+    "type": "Normal",
+    "firstTimestamp": "2025-11-23T15:00:00Z",
+    "lastTimestamp": "2025-11-23T15:00:00Z"
+  }
+}
+```
+
+## Development
+
+### Build
 
 ```bash
 go build -o kubernetes-event-logger .
 ```
 
-### Docker Build
+### Test
+
+```bash
+go test ./...
+```
+
+Current automated tests cover event filter parsing and matching behavior in [`filters_test.go`](filters_test.go).
+
+### Helm Validation
+
+```bash
+helm lint chart
+```
+
+### Container Build
 
 ```bash
 docker build -t kubernetes-event-logger .
 ```
 
-The Docker image uses a multi-stage build with a distroless base image for minimal size and security.
+The Docker image uses a multi-stage build and a distroless runtime image.
 
 ## Publishing
 
-GitHub Actions publishes multi-architecture container images to GitHub Container Registry (`ghcr.io`) on pushes to `main`, version tags matching `v*`, or manual workflow runs.
+GitHub Actions publishes multi-architecture container images to GitHub Container Registry (`ghcr.io`) on pushes to `main`, version tags matching `v*`, and manual workflow runs.
