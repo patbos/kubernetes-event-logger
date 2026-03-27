@@ -65,6 +65,11 @@ port:
   containerPort: 8080
   name: metrics
 
+startupProbe:
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 30
+
 livenessProbe:
   initialDelaySeconds: 10
   periodSeconds: 10
