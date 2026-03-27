@@ -19,7 +19,7 @@ env:
   REGISTRY: ghcr.io
 
 jobs:
-  build:
+  test:
     runs-on: ubuntu-latest
 
     steps:
@@ -52,12 +52,17 @@ jobs:
       - name: Lint Helm chart
         run: helm lint chart
 
+  build-amd64:
+    needs: test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
       - name: Normalize image name
         id: image
         run: echo "name=${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v4
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
@@ -69,16 +74,69 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push PR image
+      - name: Build and push amd64 image
         uses: docker/build-push-action@v7
         with:
           context: .
           file: ./Dockerfile
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64
           push: true
-          tags: ${{ env.REGISTRY }}/${{ steps.image.outputs.name }}:pr-${{ github.event.pull_request.number }}
-          labels: |
-            org.opencontainers.image.source=${{ github.event.pull_request.html_url }}
+          tags: ${{ env.REGISTRY }}/${{ steps.image.outputs.name }}:pr-${{ github.event.pull_request.number }}-amd64
+
+  build-arm64:
+    needs: test
+    runs-on: ubuntu-latest-arm64
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Normalize image name
+        id: image
+        run: echo "name=${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push arm64 image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/arm64
+          push: true
+          tags: ${{ env.REGISTRY }}/${{ steps.image.outputs.name }}:pr-${{ github.event.pull_request.number }}-arm64
+
+  create-manifest:
+    needs: [test, build-amd64, build-arm64]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Normalize image name
+        id: image
+        run: echo "name=${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create and push manifest
+        id: manifest
+        run: |
+          docker buildx imagetools create \
+            -t ${{ env.REGISTRY }}/${{ steps.image.outputs.name }}:pr-${{ github.event.pull_request.number }} \
+            ${{ env.REGISTRY }}/${{ steps.image.outputs.name }}:pr-${{ github.event.pull_request.number }}-amd64 \
+            ${{ env.REGISTRY }}/${{ steps.image.outputs.name }}:pr-${{ github.event.pull_request.number }}-arm64
 
       - name: Comment on PR
         uses: actions/github-script@v8

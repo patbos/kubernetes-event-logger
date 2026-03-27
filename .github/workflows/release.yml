@@ -13,8 +13,12 @@ env:
   REGISTRY: ghcr.io
 
 jobs:
-  release:
+  prepare:
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.VERSION }}
+      tag: ${{ steps.version.outputs.TAG }}
+      image-name: ${{ steps.image.outputs.name }}
 
     steps:
       - name: Check out source
@@ -55,8 +59,13 @@ jobs:
         id: image
         run: echo "name=${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v4
+  build-amd64:
+    needs: prepare
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
@@ -68,27 +77,76 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract Docker metadata
-        id: meta
-        uses: docker/metadata-action@v6
-        with:
-          images: ${{ env.REGISTRY }}/${{ steps.image.outputs.name }}
-          tags: |
-            type=ref,event=tag
-            type=semver,pattern={{version}},value=${{ steps.version.outputs.VERSION }}
-            type=semver,pattern={{major}}.{{minor}},value=${{ steps.version.outputs.VERSION }}
-            type=sha
-
-      - name: Build and push multi-arch image
+      - name: Build and push amd64 image
         uses: docker/build-push-action@v7
         with:
           context: .
           file: ./Dockerfile
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          build-args: VERSION=${{ steps.version.outputs.TAG }}
+          tags: ${{ env.REGISTRY }}/${{ needs.prepare.outputs.image-name }}:${{ needs.prepare.outputs.tag }}-amd64
+          build-args: VERSION=${{ needs.prepare.outputs.tag }}
+
+  build-arm64:
+    needs: prepare
+    runs-on: ubuntu-latest-arm64
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push arm64 image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/arm64
+          push: true
+          tags: ${{ env.REGISTRY }}/${{ needs.prepare.outputs.image-name }}:${{ needs.prepare.outputs.tag }}-arm64
+          build-args: VERSION=${{ needs.prepare.outputs.tag }}
+
+  create-manifest:
+    needs: [prepare, build-amd64, build-arm64]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.REGISTRY }}/${{ needs.prepare.outputs.image-name }}
+          tags: |
+            type=ref,event=tag
+            type=semver,pattern={{version}},value=${{ needs.prepare.outputs.version }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ needs.prepare.outputs.version }}
+            type=sha
+
+      - name: Create and push manifest
+        run: |
+          # Create manifest with both architectures
+          docker buildx imagetools create \
+            -t ${{ env.REGISTRY }}/${{ needs.prepare.outputs.image-name }}:latest \
+            -t ${{ env.REGISTRY }}/${{ needs.prepare.outputs.image-name }}:${{ needs.prepare.outputs.tag }} \
+            -t ${{ env.REGISTRY }}/${{ needs.prepare.outputs.image-name }}:${{ needs.prepare.outputs.version }} \
+            ${{ env.REGISTRY }}/${{ needs.prepare.outputs.image-name }}:${{ needs.prepare.outputs.tag }}-amd64 \
+            ${{ env.REGISTRY }}/${{ needs.prepare.outputs.image-name }}:${{ needs.prepare.outputs.tag }}-arm64
 
       - name: Set up Helm
         uses: azure/setup-helm@v4
