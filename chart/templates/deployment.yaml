@@ -58,6 +58,8 @@ spec:
                   fieldPath: metadata.namespace
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
+          startupProbe:
+            {{- include "kubernetes-event-logger.httpProbe" (dict "config" .Values.startupProbe "port" .Values.port.containerPort "path" "/health") | nindent 12 }}
           livenessProbe:
             {{- include "kubernetes-event-logger.httpProbe" (dict "config" .Values.livenessProbe "port" .Values.port.containerPort "path" "/health") | nindent 12 }}
           readinessProbe:
