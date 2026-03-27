@@ -3,10 +3,11 @@ name: Build PR Image
 on:
   pull_request:
     paths:
-      - "main.go"
+      - "**.go"
       - "go.mod"
       - "go.sum"
       - "Dockerfile"
+      - "chart/**"
       - ".github/workflows/build-pr.yml"
 
 permissions:
@@ -24,6 +25,32 @@ jobs:
     steps:
       - name: Check out source
         uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Check Go formatting
+        run: |
+          unformatted=$(gofmt -l .)
+
+          if [ -n "$unformatted" ]; then
+            echo "The following files are not properly formatted:"
+            echo "$unformatted"
+            echo ""
+            echo "Run 'gofmt -w .' to fix formatting"
+            exit 1
+          fi
+
+      - name: Run unit tests
+        run: go test ./...
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+
+      - name: Lint Helm chart
+        run: helm lint chart
 
       - name: Normalize image name
         id: image

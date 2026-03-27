@@ -1,6 +1,6 @@
 # kubernetes-event-logger
 
-[![CI](https://github.com/patbos/kubernetes-event-logger/actions/workflows/ci.yml/badge.svg)](https://github.com/patbos/kubernetes-event-logger/actions/workflows/ci.yml)
+[![CI](https://github.com/patbos/kubernetes-event-logger/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/patbos/kubernetes-event-logger/actions/workflows/ci.yml)
 
 A lightweight Kubernetes event logger that watches cluster events and writes new events as JSON to stdout.
 
