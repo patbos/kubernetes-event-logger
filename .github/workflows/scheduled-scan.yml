@@ -49,16 +49,7 @@ jobs:
             github.rest.issues.create({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              title: `🔴 New vulnerabilities detected in ${{ matrix.image.name }}:${{ matrix.image.tag }}`,
-              body: `A scheduled Trivy scan found new vulnerabilities in the \`${{ matrix.image.tag }}\` image.
-
-Check the [Security tab](https://github.com/${{ github.repository }}/security/code-scanning) for details.
-
-**Image:** \`${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.image.name }}:${{ matrix.image.tag }}\`
-
-**Next steps:**
-1. Review findings in the Security tab
-2. If critical, rebuild and release a patched version
-3. Update base image or dependencies as needed`,
+              title: '🔴 New vulnerabilities detected in ${{ matrix.image.name }}:${{ matrix.image.tag }}',
+              body: 'A scheduled Trivy scan found new vulnerabilities in the `${{ matrix.image.tag }}` image.\n\nCheck the [Security tab](https://github.com/${{ github.repository }}/security/code-scanning) for details.\n\n**Image:** `${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.image.name }}:${{ matrix.image.tag }}`\n\n**Next steps:**\n1. Review findings in the Security tab\n2. If critical, rebuild and release a patched version\n3. Update base image or dependencies as needed',
               labels: ['security', 'trivy', 'automated']
             })
