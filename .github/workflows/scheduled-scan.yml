@@ -1,0 +1,64 @@
+name: Scheduled Security Scan
+
+on:
+  schedule:
+    # Run daily at 2 AM UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:  # Allow manual trigger
+
+permissions:
+  contents: read
+  security-events: write
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        # Scan latest release image and base image separately
+        image:
+          - name: kubernetes-event-logger
+            tag: latest
+          - name: kubernetes-event-logger
+            tag: main
+
+    steps:
+      - name: Run Trivy scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.image.name }}:${{ matrix.image.tag }}
+          format: sarif
+          output: trivy-${{ matrix.image.tag }}-results.sarif
+          severity: CRITICAL,HIGH
+
+      - name: Upload Trivy results
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: trivy-${{ matrix.image.tag }}-results.sarif
+          category: trivy-${{ matrix.image.tag }}
+
+      - name: Create issue if vulnerabilities found
+        if: failure()
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd  # v8
+        with:
+          script: |
+            github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `🔴 New vulnerabilities detected in ${{ matrix.image.name }}:${{ matrix.image.tag }}`,
+              body: `A scheduled Trivy scan found new vulnerabilities in the \`${{ matrix.image.tag }}\` image.
+
+Check the [Security tab](https://github.com/${{ github.repository }}/security/code-scanning) for details.
+
+**Image:** \`${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.image.name }}:${{ matrix.image.tag }}\`
+
+**Next steps:**
+1. Review findings in the Security tab
+2. If critical, rebuild and release a patched version
+3. Update base image or dependencies as needed`,
+              labels: ['security', 'trivy', 'automated']
+            })
