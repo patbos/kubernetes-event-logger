@@ -27,7 +27,7 @@ jobs:
 
     steps:
       - name: Run Trivy scan
-        uses: aquasecurity/trivy-action@6e7b7d1feac574474aa14e39f0f97658e9be75ef  # v0.25
+        uses: aquasecurity/trivy-action@master
         with:
           image-ref: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.image.name }}:${{ matrix.image.tag }}
           format: sarif
@@ -35,7 +35,7 @@ jobs:
           severity: CRITICAL,HIGH
 
       - name: Upload Trivy results
-        uses: github/codeql-action/upload-sarif@662472033e021d55d3e11efd867d592838e2e78a  # v3
+        uses: github/codeql-action/upload-sarif@v3
         if: always()
         with:
           sarif_file: trivy-${{ matrix.image.tag }}-results.sarif

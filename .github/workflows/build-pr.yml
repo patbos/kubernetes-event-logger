@@ -58,21 +58,21 @@ jobs:
           context: .
           file: ./Dockerfile
           platforms: linux/amd64
-          load: true
+          outputs: type=docker,dest=/tmp/image.tar
           tags: kubernetes-event-logger:pr-${{ github.event.pull_request.number }}
           labels: |
             org.opencontainers.image.source=${{ github.event.pull_request.html_url }}
 
       - name: Run Trivy vulnerability scan
-        uses: aquasecurity/trivy-action@6e7b7d1feac574474aa14e39f0f97658e9be75ef  # v0.25
+        uses: aquasecurity/trivy-action@master
         with:
-          image-ref: docker://kubernetes-event-logger:pr-${{ github.event.pull_request.number }}
+          input: /tmp/image.tar
           format: sarif
           output: trivy-results.sarif
           severity: CRITICAL,HIGH
 
       - name: Upload Trivy results to GitHub Security
-        uses: github/codeql-action/upload-sarif@662472033e021d55d3e11efd867d592838e2e78a  # v3
+        uses: github/codeql-action/upload-sarif@v3
         if: always()
         with:
           sarif_file: trivy-results.sarif
