@@ -59,6 +59,26 @@ ServiceAccount name.
 {{- end }}
 {{- end }}
 
+{{/*
+Build the container image reference.
+If a digest is provided, prefer an immutable reference. Keep the tag when available
+so the rendered image remains easy to read while the digest pins the actual content.
+*/}}
+{{- define "kubernetes-event-logger.image" -}}
+{{- $repository := .Values.image.repository -}}
+{{- $tag := .Values.image.tag | default .Chart.AppVersion -}}
+{{- $digest := .Values.image.digest -}}
+{{- if $digest -}}
+{{- if $tag -}}
+{{- printf "%s:%s@%s" $repository $tag $digest -}}
+{{- else -}}
+{{- printf "%s@%s" $repository $digest -}}
+{{- end -}}
+{{- else -}}
+{{- printf "%s:%s" $repository $tag -}}
+{{- end -}}
+{{- end }}
+
 {{- define "kubernetes-event-logger.excludeFilter" -}}
 {{- $parts := list -}}
 {{- with .namespace -}}

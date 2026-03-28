@@ -48,6 +48,7 @@ helm install kubernetes-event-logger oci://ghcr.io/patbos/kubernetes-event-logge
   --version <version> \
   --set replicaCount=2 \
   --set image.tag=v0.2.2 \
+  --set image.digest=sha256:<digest> \
   --set 'excludeFilters[0].kind=Node' \
   --set 'excludeFilters[0].type=Normal' \
   --set 'excludeFilters[1].namespace=kube-system' \
@@ -61,6 +62,7 @@ replicaCount: 2
 
 image:
   tag: v0.2.2
+  digest: sha256:<digest>
 
 excludeFilters:
   - kind: Node
@@ -167,6 +169,7 @@ Common chart values:
 | `replicaCount` | Number of pods to run; leader election ensures only one actively processes events | `2` |
 | `image.repository` | Container image repository | `ghcr.io/patbos/kubernetes-event-logger` |
 | `image.tag` | Image tag; falls back to chart `appVersion` | `""` |
+| `image.digest` | Immutable image digest; when set, the chart renders `repository[:tag]@digest` | `""` |
 | `image.pullPolicy` | Image pull policy | `Always` |
 | `excludeFilters` | List of event exclusion rules | `[]` |
 | `leaderElection.leaseDuration` | Leader lease duration | `15s` |

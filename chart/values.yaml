@@ -10,6 +10,10 @@ image:
   pullPolicy: Always
   # Overrides the image tag whose default is the chart appVersion.
   tag: ""
+  # Optional immutable image digest, for example:
+  # sha256:0123456789abcdef...
+  # When set, the chart renders repository[:tag]@digest and Kubernetes pulls by digest.
+  digest: ""
 
 imagePullSecrets: []
 nameOverride: ""
