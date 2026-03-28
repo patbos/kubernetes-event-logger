@@ -7,4 +7,5 @@ metadata:
 rules:
   - apiGroups: ["coordination.k8s.io"]
     resources: ["leases"]
-    verbs: ["get", "create", "update"]
+    resourceNames: ["{{ include "kubernetes-event-logger.leaseName" . }}"]
+    verbs: ["get", "update"]
