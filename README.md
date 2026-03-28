@@ -32,6 +32,7 @@ The binary is intended to run either:
 - Access to a Kubernetes cluster
 - RBAC permission to read `events`
 - RBAC permission to manage a `Lease` in the deployment namespace for leader election
+- If you use Pod Security Admission, label the target namespace separately; this chart does not enforce PSA by applying pod labels
 
 ## Installation
 
@@ -230,6 +231,19 @@ The application needs:
 - a namespaced permission set to `get`, `create`, and `update` `leases` in `coordination.k8s.io`
 
 The bundled Helm chart creates the required ServiceAccount, ClusterRole, ClusterRoleBinding, Role, and RoleBinding resources.
+
+## Pod Security
+
+The chart is configured to be compatible with the Kubernetes restricted profile by running as non-root, dropping Linux capabilities, using `RuntimeDefault` seccomp, and setting a read-only root filesystem.
+
+Pod Security Admission enforcement is namespace-scoped. If you want Kubernetes to enforce the restricted policy, label the namespace that will run this workload, for example:
+
+```bash
+kubectl label namespace <namespace> \
+  pod-security.kubernetes.io/enforce=restricted \
+  pod-security.kubernetes.io/audit=restricted \
+  pod-security.kubernetes.io/warn=restricted
+```
 
 ## HTTP Endpoints
 

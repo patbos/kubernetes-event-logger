@@ -27,15 +27,12 @@ serviceAccount:
 
 podAnnotations: {}
 
-# Pod Security Standards labels for Kubernetes 1.25+
-# Enforces restricted security standard at pod level
-# - enforce: rejects non-compliant pods
-# - audit: logs violations
-# - warn: displays warnings
-podLabels:
-  pod-security.kubernetes.io/enforce: restricted
-  pod-security.kubernetes.io/audit: restricted
-  pod-security.kubernetes.io/warn: restricted
+# Additional pod labels.
+# Pod Security Admission is enforced with namespace labels, not pod labels.
+# This chart is configured to be compatible with the restricted profile via
+# pod/container security contexts, but namespace enforcement must be enabled
+# separately by the cluster operator.
+podLabels: {}
 
 podSecurityContext:
   runAsNonRoot: true
