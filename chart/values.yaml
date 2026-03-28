@@ -22,7 +22,8 @@ fullnameOverride: ""
 serviceAccount:
   create: true
   annotations: {}
-  # Overrides the name; defaults to the fullname of the release.
+  # Overrides the name; defaults to the fullname of the release when create=true.
+  # Required when create=false so RBAC is not bound to the namespace default ServiceAccount.
   name: ""
 
 podAnnotations: {}
