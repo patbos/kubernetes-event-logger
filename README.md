@@ -200,6 +200,8 @@ Common chart values:
 | `image.tag` | Image tag; falls back to chart `appVersion` | `""` |
 | `image.digest` | Immutable image digest; when set, the chart renders `repository[:tag]@digest` | `""` |
 | `image.pullPolicy` | Image pull policy | `Always` |
+| `serviceAccount.create` | Create a dedicated ServiceAccount for this release | `true` |
+| `serviceAccount.name` | ServiceAccount name override; required when `serviceAccount.create=false` | `""` |
 | `excludeFilters` | List of event exclusion rules | `[]` |
 | `leaderElection.leaseDuration` | Leader lease duration | `15s` |
 | `leaderElection.renewDeadline` | Lease renew deadline | `10s` |
@@ -231,6 +233,7 @@ The application needs:
 - a namespaced permission set to `get` and `update` the leader-election `Lease` in `coordination.k8s.io`
 
 The bundled Helm chart creates the required ServiceAccount, ClusterRole, ClusterRoleBinding, Role, RoleBinding, and pre-created `Lease` resources.
+If you set `serviceAccount.create=false`, you must also set `serviceAccount.name` so the chart binds permissions to an explicit existing ServiceAccount.
 
 ## Pod Security
 
