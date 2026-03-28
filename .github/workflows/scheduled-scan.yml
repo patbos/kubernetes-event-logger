@@ -19,12 +19,10 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        # Scan latest release image and base image separately
+        # Scan latest released image for new CVEs discovered after release
         image:
           - name: kubernetes-event-logger
             tag: latest
-          - name: kubernetes-event-logger
-            tag: main
 
     steps:
       - name: Run Trivy scan
