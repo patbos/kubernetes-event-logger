@@ -60,6 +60,13 @@ ServiceAccount name.
 {{- end }}
 
 {{/*
+Leader election Lease name.
+*/}}
+{{- define "kubernetes-event-logger.leaseName" -}}
+{{- printf "kubernetes-event-logger" -}}
+{{- end }}
+
+{{/*
 Build the container image reference.
 If a digest is provided, prefer an immutable reference. Keep the tag when available
 so the rendered image remains easy to read while the digest pins the actual content.

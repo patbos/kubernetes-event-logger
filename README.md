@@ -230,9 +230,9 @@ During failover or rollout, some events can be logged twice. Downstream consumer
 The application needs:
 
 - a cluster-scoped permission set to `get`, `list`, and `watch` `events`
-- a namespaced permission set to `get`, `create`, and `update` `leases` in `coordination.k8s.io`
+- a namespaced permission set to `get` and `update` the leader-election `Lease` in `coordination.k8s.io`
 
-The bundled Helm chart creates the required ServiceAccount, ClusterRole, ClusterRoleBinding, Role, and RoleBinding resources.
+The bundled Helm chart creates the required ServiceAccount, ClusterRole, ClusterRoleBinding, Role, RoleBinding, and pre-created `Lease` resources.
 If you set `serviceAccount.create=false`, you must also set `serviceAccount.name` so the chart binds permissions to an explicit existing ServiceAccount.
 
 ## Pod Security
