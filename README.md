@@ -108,6 +108,34 @@ docker build -t kubernetes-event-logger .
 docker run -v ~/.kube/config:/config:ro kubernetes-event-logger -kubeconfig=/config
 ```
 
+## Verifying Images
+
+Release images are signed with `cosign` in the GitHub Actions release workflow and should be verified by digest.
+
+Resolve a digest for a published tag:
+
+```bash
+docker buildx imagetools inspect ghcr.io/patbos/kubernetes-event-logger:v0.2.2
+```
+
+Verify the signature for a specific digest:
+
+```bash
+cosign verify \
+  --certificate-identity-regexp 'https://github.com/patbos/kubernetes-event-logger/.github/workflows/release.yml@refs/tags/v.*' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  ghcr.io/patbos/kubernetes-event-logger@sha256:<digest>
+```
+
+Use the verified digest in Helm:
+
+```bash
+helm install kubernetes-event-logger oci://ghcr.io/patbos/kubernetes-event-logger \
+  --version 0.2.2 \
+  --set image.tag=v0.2.2 \
+  --set image.digest=sha256:<digest>
+```
+
 ## Configuration
 
 ### Authentication
