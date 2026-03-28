@@ -15,6 +15,7 @@ import (
 func TestEventTime(t *testing.T) {
 	now := time.Now().UTC()
 	past := now.Add(-1 * time.Hour)
+	future := now.Add(1 * time.Hour)
 
 	testCases := []struct {
 		name     string
@@ -31,20 +32,32 @@ func TestEventTime(t *testing.T) {
 			expected: now,
 		},
 		{
-			name: "falls back to LastTimestamp when EventTime is zero",
-			event: &v1.Event{
-				LastTimestamp:  metav1.Time{Time: now},
-				FirstTimestamp: metav1.Time{Time: past},
-			},
-			expected: now,
-		},
-		{
 			name: "falls back to Series.LastObservedTime for ongoing event series",
 			event: &v1.Event{
+				LastTimestamp:  metav1.Time{Time: past},
 				FirstTimestamp: metav1.Time{Time: past},
 				Series: &v1.EventSeries{
 					LastObservedTime: metav1.MicroTime{Time: now},
 				},
+			},
+			expected: now,
+		},
+		{
+			name: "prefers Series.LastObservedTime over LastTimestamp",
+			event: &v1.Event{
+				LastTimestamp:  metav1.Time{Time: past},
+				FirstTimestamp: metav1.Time{Time: past},
+				Series: &v1.EventSeries{
+					LastObservedTime: metav1.MicroTime{Time: future},
+				},
+			},
+			expected: future,
+		},
+		{
+			name: "falls back to LastTimestamp when EventTime and Series.LastObservedTime are zero",
+			event: &v1.Event{
+				LastTimestamp:  metav1.Time{Time: now},
+				FirstTimestamp: metav1.Time{Time: past},
 			},
 			expected: now,
 		},
