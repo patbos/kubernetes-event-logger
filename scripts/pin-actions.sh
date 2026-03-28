@@ -22,6 +22,7 @@ for workflow in "$WORKFLOWS_DIR"/*.yml "$WORKFLOWS_DIR"/*.yaml; do
   fi
 
   echo "Processing: $workflow"
+  export workflow
 
   python3 << 'PYTHON'
 import re
@@ -30,6 +31,9 @@ import os
 import sys
 
 workflow_file = os.environ.get('workflow')
+if not workflow_file:
+    print("missing workflow environment variable", file=sys.stderr)
+    sys.exit(1)
 
 def get_action_sha(owner_repo, version_tag):
     """Get commit SHA for a GitHub action"""
@@ -84,8 +88,6 @@ if content != original_content:
 else:
   print(f'  ✓ Already pinned or no changes')
 PYTHON
-
-  export workflow="$workflow"
 done
 
 echo ""
