@@ -62,19 +62,27 @@ with open(workflow_file, 'r') as f:
 
 original_content = content
 
-# Find uses: owner/repo@vX.Y.Z or vX.Y or vX patterns
-pattern = r'uses:\s+([a-zA-Z0-9\-_.]+/[a-zA-Z0-9\-_.]+)@(v\d+(?:\.\d+)*)(?:\s+#.*)?'
+# Find uses: owner/repo[/subcommand]@vX.Y.Z or vX.Y or vX or branch patterns
+pattern = r'uses:\s+([a-zA-Z0-9\-_.]+/[a-zA-Z0-9\-_.]+(?:/[a-zA-Z0-9\-_.]+)?)@([a-zA-Z0-9\-_.]+)(?:\s+#(.*))?'
 
 def replace_with_sha(match):
   action = match.group(1)
-  version_tag = match.group(2)  # Already includes 'v'
+  version_tag = match.group(2)
+  existing_comment = match.group(3).strip() if match.lastindex >= 3 and match.group(3) else None
 
   print(f'  {action}@{version_tag}...', end=' ', flush=True)
+
+  # Skip if already pinned to a SHA (40 hex characters)
+  if len(version_tag) == 40 and all(c in '0123456789abcdef' for c in version_tag):
+    print(f'✓ already pinned')
+    return match.group(0)
 
   sha = get_action_sha(action, version_tag)
   if sha:
     print(f'✓ {sha[:7]}...')
-    return f'uses: {action}@{sha}  # {version_tag}'
+    # Preserve existing comment if present, otherwise use version as comment
+    comment = existing_comment if existing_comment else version_tag
+    return f'uses: {action}@{sha}  # {comment}'
   else:
     print('⊘ keeping (not found)')
     return match.group(0)
