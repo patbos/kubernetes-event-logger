@@ -107,10 +107,12 @@ jobs:
           severity: CRITICAL,HIGH
 
       - name: Upload Trivy results to GitHub Security
-        uses: github/codeql-action/upload-sarif@7fc1baf373eb073c686865bd453d412d506a05a2  # v3.35.1
+        uses: github/codeql-action/upload-sarif@0e9f55954318745b37b7933c693bc093f7336125  # v4.35.1
         if: always()
         with:
           sarif_file: trivy-results.sarif
+          sha: ${{ github.sha }}
+          ref: refs/tags/${{ github.ref_name }}
 
       - name: Sign image
         env:
