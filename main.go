@@ -303,6 +303,9 @@ func eventTime(event *v1.Event) time.Time {
 	if !event.EventTime.IsZero() {
 		return event.EventTime.Time
 	}
+	if event.Series != nil && !event.Series.LastObservedTime.IsZero() {
+		return event.Series.LastObservedTime.Time
+	}
 	if !event.LastTimestamp.IsZero() {
 		return event.LastTimestamp.Time
 	}
