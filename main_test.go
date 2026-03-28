@@ -39,6 +39,16 @@ func TestEventTime(t *testing.T) {
 			expected: now,
 		},
 		{
+			name: "falls back to Series.LastObservedTime for ongoing event series",
+			event: &v1.Event{
+				FirstTimestamp: metav1.Time{Time: past},
+				Series: &v1.EventSeries{
+					LastObservedTime: metav1.MicroTime{Time: now},
+				},
+			},
+			expected: now,
+		},
+		{
 			name: "falls back to FirstTimestamp when EventTime and LastTimestamp are zero",
 			event: &v1.Event{
 				FirstTimestamp: metav1.Time{Time: now},
@@ -141,6 +151,17 @@ func TestIsHistorical(t *testing.T) {
 			},
 			startTime: now,
 			expected:  true,
+		},
+		{
+			name: "uses Series.LastObservedTime for ongoing event series",
+			event: &v1.Event{
+				FirstTimestamp: metav1.Time{Time: past},
+				Series: &v1.EventSeries{
+					LastObservedTime: metav1.MicroTime{Time: future},
+				},
+			},
+			startTime: now,
+			expected:  false,
 		},
 	}
 
