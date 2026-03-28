@@ -8,6 +8,7 @@ on:
 permissions:
   contents: write
   packages: write
+  id-token: write
 
 env:
   REGISTRY: ghcr.io
@@ -80,6 +81,7 @@ jobs:
             type=sha
 
       - name: Build and push multi-arch image
+        id: build
         uses: docker/build-push-action@v7
         with:
           context: .
@@ -89,9 +91,27 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: VERSION=${{ steps.version.outputs.TAG }}
+          sbom: true
+          provenance: true
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign image
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          IMAGE: ${{ env.REGISTRY }}/${{ steps.image.outputs.name }}
+        run: cosign sign --yes "${IMAGE}@${DIGEST}"
 
       - name: Set up Helm
         uses: azure/setup-helm@v4
+
+      - name: Set chart image digest
+        run: |
+          DIGEST=${{ steps.build.outputs.digest }}
+          echo "Updating chart/values.yaml to use image digest ${DIGEST}"
+          sed -i "s|^  digest:.*|  digest: \"${DIGEST}\"|" chart/values.yaml
+          grep -E "^  digest:" chart/values.yaml
 
       - name: Package Helm chart
         run: |
