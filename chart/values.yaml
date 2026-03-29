@@ -151,8 +151,9 @@ serviceMonitor:
 # Network Policy: restrict traffic to/from the pod
 # Prevents lateral movement if pod is compromised
 # Requires cluster with network policy support (Calico, Cilium, etc)
+# RECOMMENDATION: Enable in production clusters with network policy support for defense-in-depth
 networkPolicy:
-  enabled: true
+  enabled: false
   # Ingress: allow traffic from Prometheus for metrics scraping
   ingress:
     prometheus:
