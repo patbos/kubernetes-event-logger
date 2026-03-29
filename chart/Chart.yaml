@@ -8,6 +8,7 @@ keywords:
   - kubernetes
   - events
   - logging
+icon: https://raw.githubusercontent.com/patbos/kubernetes-event-logger/main/images/icon.png
 home: https://github.com/patbos/kubernetes-event-logger
 sources:
   - https://github.com/patbos/kubernetes-event-logger
