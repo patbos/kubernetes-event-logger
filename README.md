@@ -209,7 +209,7 @@ Common chart values:
 | `leaderElection.renewDeadline` | Lease renew deadline | `10s` |
 | `leaderElection.retryPeriod` | Lease retry interval | `2s` |
 | `serviceMonitor.enabled` | Create a Prometheus Operator `ServiceMonitor` | `false` |
-| `networkPolicy.enabled` | Create a `NetworkPolicy` for metrics ingress and DNS/API egress | `true` |
+| `networkPolicy.enabled` | Create a `NetworkPolicy` for metrics ingress and DNS/API egress | `false` |
 | `podDisruptionBudget.enabled` | Create a PodDisruptionBudget | `true` |
 | `resources` | Pod resource requests and limits | see [`chart/values.yaml`](chart/values.yaml) |
 
