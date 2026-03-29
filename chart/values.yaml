@@ -126,7 +126,7 @@ leaderElection:
 
 # List of event exclusion rules.
 # Each rule excludes events only when all configured fields match.
-# Supported fields: namespace, kind, name, reason, type, reportingComponent, sourceComponent
+# Supported fields: namespace, kind, name, reason, type, reporting-component, reporting-controller, source-component
 # Example:
 #   - kind: Node
 #     type: Normal
