@@ -4,6 +4,7 @@ description: A lightweight Kubernetes event logger that watches cluster events a
 type: application
 version: 0.2.2
 appVersion: "0.2.2"
+kubeVersion: ">=1.25"
 keywords:
   - kubernetes
   - events

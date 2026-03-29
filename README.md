@@ -30,6 +30,7 @@ The binary is intended to run either:
 
 ## Requirements
 
+- Kubernetes `1.25+` (for stable PodDisruptionBudget API)
 - Go `1.25+` to build from source
 - Access to a Kubernetes cluster
 - RBAC permission to read `events`
