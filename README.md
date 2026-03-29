@@ -28,7 +28,7 @@ The binary is intended to run either:
 
 ## Requirements
 
-- Go `1.24+` to build from source
+- Go `1.25+` to build from source
 - Access to a Kubernetes cluster
 - RBAC permission to read `events`
 - RBAC permission to manage a `Lease` in the deployment namespace for leader election
@@ -288,7 +288,7 @@ Prometheus metrics currently exposed at `/metrics`:
 
 Each log line is a JSON object with:
 
-- `time`: event timestamp chosen from `eventTime`, `lastTimestamp`, or `firstTimestamp`
+- `time`: event timestamp chosen from `eventTime`, `series.lastObservedTime`, `lastTimestamp`, or `firstTimestamp` (in that order)
 - `level`: derived from event type (`Warning` -> `warn`, `Normal` -> `info`, other values -> `debug`)
 - `event`: the original Kubernetes event object
 
@@ -332,7 +332,7 @@ go build -o kubernetes-event-logger .
 go test ./...
 ```
 
-Current automated tests cover event filter parsing and matching behavior in [`filters_test.go`](filters_test.go).
+Current automated tests cover event filter parsing and matching, health endpoint behavior, timestamp selection, and related helper logic in `filters_test.go` and `main_test.go`.
 
 ### Helm Validation
 
