@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strings"
 
 	"github.com/go-logr/logr"
 	"github.com/prometheus/client_golang/prometheus"
@@ -79,6 +80,18 @@ var (
 		Help:    "Time taken to process (marshal and log) a single event.",
 		Buckets: prometheus.DefBuckets,
 	})
+	eventsByNamespaceTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "kubernetes_event_logger_events_by_namespace_total",
+		Help: "Total number of events logged, broken down by namespace.",
+	}, []string{"namespace"})
+	eventsByReasonTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "kubernetes_event_logger_events_by_reason_total",
+		Help: "Total number of events logged, broken down by reason.",
+	}, []string{"reason"})
+	eventsByObjectKindTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "kubernetes_event_logger_events_by_object_kind_total",
+		Help: "Total number of events logged, broken down by involved object kind.",
+	}, []string{"object_kind"})
 	informerCacheSyncDuration = prometheus.NewGauge(prometheus.GaugeOpts{
 		Name: "kubernetes_event_logger_informer_cache_sync_duration_seconds",
 		Help: "Time taken for the informer cache to sync on startup (seconds).",
@@ -94,6 +107,9 @@ func init() {
 		eventsFilteredTotal,
 		eventsFailedTotal,
 		eventProcessingDuration,
+		eventsByNamespaceTotal,
+		eventsByReasonTotal,
+		eventsByObjectKindTotal,
 		informerCacheSyncDuration,
 	)
 }
@@ -111,6 +127,7 @@ func main() {
 	leaseDuration := flag.Duration("lease-duration", 15*time.Second, "duration a leader lease is valid before another candidate can take over")
 	renewDeadline := flag.Duration("renew-deadline", 10*time.Second, "duration the leader has to renew the lease before losing it")
 	retryPeriod := flag.Duration("retry-period", 2*time.Second, "how often candidates retry acquiring or renewing the lease")
+	enableDetailedMetrics := flag.Bool("enable-detailed-metrics", false, "enable high-cardinality metrics (events by namespace and reason)")
 	var excludeFilters eventFilters
 	flag.Var(&excludeFilters, "exclude-filter", "exclude events matching all clauses in a rule; repeatable, format: field=value[,field=value] with fields namespace,kind,name,reason,type,reporting-component,source-component")
 	flag.Parse()
@@ -158,7 +175,8 @@ func main() {
 
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", promhttp.Handler())
-	mux.HandleFunc("/health", handleHealth)
+	mux.HandleFunc("/healthz", handleHealth)
+	mux.HandleFunc("/readyz", handleHealth)
 	srv := &http.Server{
 		Addr:              ":8080",
 		Handler:           mux,
@@ -214,7 +232,7 @@ func main() {
 				healthState.isLeader = true
 				healthState.Unlock()
 				leaderElectionsTotal.Inc()
-				runInformer(ctx, clientset, loggerEvent, excludeFilters)
+				runInformer(ctx, clientset, loggerEvent, excludeFilters, *enableDetailedMetrics)
 			},
 			OnStoppedLeading: func() {
 				leaderGauge.Set(0)
@@ -234,7 +252,7 @@ func main() {
 	wg.Wait()
 }
 
-func runInformer(ctx context.Context, clientset *kubernetes.Clientset, loggerEvent *log.Logger, excludeFilters eventFilters) {
+func runInformer(ctx context.Context, clientset *kubernetes.Clientset, loggerEvent *log.Logger, excludeFilters eventFilters, enableDetailedMetrics bool) {
 	startTime := time.Now().UTC()
 	slog.Info("Became leader. Starting to process events.", "start_time", startTime.Format(time.RFC3339))
 
@@ -272,6 +290,11 @@ func runInformer(ctx context.Context, clientset *kubernetes.Clientset, loggerEve
 		}
 		loggerEvent.Printf("%s\n", string(wrapper))
 		eventsTotal.WithLabelValues(event.Type).Inc()
+		if enableDetailedMetrics {
+			eventsByNamespaceTotal.WithLabelValues(event.InvolvedObject.Namespace).Inc()
+			eventsByReasonTotal.WithLabelValues(event.Reason).Inc()
+			eventsByObjectKindTotal.WithLabelValues(event.InvolvedObject.Kind).Inc()
+		}
 		lastEventTimestamp.SetToCurrentTime()
 		eventProcessingDuration.Observe(time.Since(start).Seconds())
 	}
@@ -313,14 +336,13 @@ func eventTime(event *v1.Event) time.Time {
 }
 
 func eventLevel(eventType string) string {
-	switch eventType {
-	case "Warning":
+	if strings.EqualFold(eventType, "Warning") {
 		return "warn"
-	case "Normal":
-		return "info"
-	default:
-		return "debug"
 	}
+	if strings.EqualFold(eventType, "Normal") {
+		return "info"
+	}
+	return "debug"
 }
 
 func isHistorical(event *v1.Event, startTime time.Time) bool {
