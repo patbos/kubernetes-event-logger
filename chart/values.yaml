@@ -125,6 +125,10 @@ leaderElection:
   renewDeadline: 10s      # Time leader has to renew lease before losing it
   retryPeriod: 2s         # Retry interval for acquiring/renewing lease
 
+# Enable high-cardinality metrics (events by namespace, reason, and object kind).
+# Recommendation: Keep disabled in large clusters to avoid Prometheus performance issues.
+enableDetailedMetrics: false
+
 # List of event exclusion rules.
 # Each rule excludes events only when all configured fields match.
 # Supported fields: namespace, kind, name, reason, type, reporting-component, reporting-controller, source-component
