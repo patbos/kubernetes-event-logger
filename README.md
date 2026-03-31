@@ -24,7 +24,7 @@ The binary is intended to run either:
 - In-cluster and kubeconfig-based authentication
 - Leader election for active/standby deployments
 - Prometheus metrics at `/metrics`
-- HTTP health endpoint at `/health`
+- HTTP health endpoints at `/healthz` and `/readyz`
 - Distroless container image
 - Helm chart with RBAC, probes, PDB, Service, optional ServiceMonitor, and optional NetworkPolicy
 
@@ -157,6 +157,7 @@ The binary first tries the supplied kubeconfig path. If that fails, it falls bac
 | `-lease-duration` | Duration a leader lease remains valid | `15s` |
 | `-renew-deadline` | Time the leader has to renew the lease | `10s` |
 | `-retry-period` | Retry interval for acquiring or renewing the lease | `2s` |
+| `-enable-detailed-metrics` | Enable high-cardinality metrics (namespace, reason, kind) | `false` |
 | `-exclude-filter` | Exclude events matching all clauses in one rule; repeatable | none |
 
 `-exclude-filter` syntax:
@@ -206,6 +207,7 @@ Common chart values:
 | `serviceAccount.create` | Create a dedicated ServiceAccount for this release | `true` |
 | `serviceAccount.name` | ServiceAccount name override; required when `serviceAccount.create=false` | `""` |
 | `excludeFilters` | List of event exclusion rules | `[]` |
+| `enableDetailedMetrics` | Enable high-cardinality Prometheus metrics | `false` |
 | `leaderElection.leaseDuration` | Leader lease duration | `15s` |
 | `leaderElection.renewDeadline` | Lease renew deadline | `10s` |
 | `leaderElection.retryPeriod` | Lease retry interval | `2s` |
@@ -258,9 +260,10 @@ The process listens on port `8080`.
 | Path | Purpose |
 |---|---|
 | `/metrics` | Prometheus metrics |
-| `/health` | JSON liveness/readiness response |
+| `/healthz` | JSON liveness response |
+| `/readyz` | JSON readiness response |
 
-Example `/health` response:
+Example `/healthz` response:
 
 ```json
 {
@@ -272,7 +275,7 @@ Example `/health` response:
 }
 ```
 
-`/health` returns HTTP `503` until informer cache sync completes. Non-leader replicas still report healthy once synced because they are ready to take over.
+Both endpoints return HTTP `503` until informer cache sync completes. Non-leader replicas still report healthy once synced because they are ready to take over.
 
 ## Metrics
 
@@ -286,6 +289,9 @@ Prometheus metrics currently exposed at `/metrics`:
 - `kubernetes_event_logger_leader`
 - `kubernetes_event_logger_leader_elections_total`
 - `kubernetes_event_logger_informer_cache_sync_duration_seconds`
+- `kubernetes_event_logger_events_by_namespace_total` (optional, via `-enable-detailed-metrics`)
+- `kubernetes_event_logger_events_by_reason_total` (optional, via `-enable-detailed-metrics`)
+- `kubernetes_event_logger_events_by_object_kind_total` (optional, via `-enable-detailed-metrics`)
 
 ## Output Format
 
