@@ -35,13 +35,20 @@ import (
 
 var version = "dev"
 
+type eventLogEntry struct {
+	Time  time.Time `json:"time"`
+	Level string    `json:"level"`
+	Event *v1.Event `json:"event"`
+}
+
 // Health state tracking
 var (
 	healthState = struct {
 		sync.RWMutex
-		isLeader    bool
-		cacheSynced bool
-		startTime   time.Time
+		isLeader        bool
+		cacheSynced     bool
+		startTime       time.Time
+		leaderStartTime time.Time
 	}{
 		startTime: time.Now(),
 	}
@@ -198,9 +205,67 @@ func main() {
 		}
 	}()
 
+	// Define event processor
+	logEvent := func(obj interface{}) {
+		healthState.RLock()
+		isLeader := healthState.isLeader
+		leaderStartTime := healthState.leaderStartTime
+		healthState.RUnlock()
+
+		if !isLeader {
+			return
+		}
+
+		start := time.Now()
+		event, ok := obj.(*v1.Event)
+		if !ok {
+			return
+		}
+		if isHistorical(event, leaderStartTime) {
+			eventsFilteredTotal.WithLabelValues("historical").Inc()
+			return
+		}
+		if excludeFilters.Match(event) {
+			eventsFilteredTotal.WithLabelValues("excluded_filter").Inc()
+			return
+		}
+		wrapper, err := json.Marshal(eventLogEntry{
+			Time:  eventTime(event),
+			Level: eventLevel(event.Type),
+			Event: event,
+		})
+		if err != nil {
+			slog.Error("Failed to marshal event", "error", err)
+			eventsFailedTotal.WithLabelValues("marshal_error").Inc()
+			return
+		}
+		loggerEvent.Printf("%s\n", string(wrapper))
+		eventsTotal.WithLabelValues(event.Type).Inc()
+		if *enableDetailedMetrics {
+			eventsByNamespaceTotal.WithLabelValues(event.InvolvedObject.Namespace).Inc()
+			eventsByReasonTotal.WithLabelValues(event.Reason).Inc()
+			eventsByObjectKindTotal.WithLabelValues(event.InvolvedObject.Kind).Inc()
+		}
+		lastEventTimestamp.SetToCurrentTime()
+		eventProcessingDuration.Observe(time.Since(start).Seconds())
+	}
+
 	// Sync cache for all pods (leader and standby) before leader election
 	factory := informers.NewSharedInformerFactory(clientset, 0)
+	defer factory.Shutdown()
+
 	eventInformer := factory.Core().V1().Events().Informer()
+	_, err = eventInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc: logEvent,
+		UpdateFunc: func(_, newObj interface{}) {
+			logEvent(newObj)
+		},
+	})
+	if err != nil {
+		slog.Error("Failed to add event handler", "error", err)
+		os.Exit(1)
+	}
+
 	factory.Start(ctx.Done())
 	slog.Info("Waiting for informer caches to sync...")
 	syncStart := time.Now()
@@ -213,7 +278,6 @@ func main() {
 	healthState.cacheSynced = true
 	healthState.Unlock()
 	slog.Info("Caches synced. Ready for event processing...")
-	defer factory.Shutdown()
 
 	var wg sync.WaitGroup
 	var lastLeader string
@@ -228,11 +292,15 @@ func main() {
 			OnStartedLeading: func(ctx context.Context) {
 				defer wg.Done()
 				leaderGauge.Set(1)
+				startTime := time.Now().UTC()
 				healthState.Lock()
 				healthState.isLeader = true
+				healthState.leaderStartTime = startTime
 				healthState.Unlock()
 				leaderElectionsTotal.Inc()
-				runInformer(ctx, clientset, loggerEvent, excludeFilters, *enableDetailedMetrics)
+				slog.Info("Became leader. Starting to process events.", "start_time", startTime.Format(time.RFC3339))
+				<-ctx.Done()
+				slog.Info("Shutting down event processing.")
 			},
 			OnStoppedLeading: func() {
 				leaderGauge.Set(0)
@@ -252,75 +320,6 @@ func main() {
 	wg.Wait()
 }
 
-func runInformer(ctx context.Context, clientset *kubernetes.Clientset, loggerEvent *log.Logger, excludeFilters eventFilters, enableDetailedMetrics bool) {
-	startTime := time.Now().UTC()
-	slog.Info("Became leader. Starting to process events.", "start_time", startTime.Format(time.RFC3339))
-
-	type eventWithTime struct {
-		Time  time.Time       `json:"time"`
-		Level string          `json:"level"`
-		Event json.RawMessage `json:"event"`
-	}
-
-	logEvent := func(obj interface{}) {
-		start := time.Now()
-		event, ok := obj.(*v1.Event)
-		if !ok {
-			return
-		}
-		if isHistorical(event, startTime) {
-			eventsFilteredTotal.WithLabelValues("historical").Inc()
-			return
-		}
-		if excludeFilters.Match(event) {
-			eventsFilteredTotal.WithLabelValues("excluded_filter").Inc()
-			return
-		}
-		j, err := json.Marshal(obj)
-		if err != nil {
-			slog.Error("Failed to marshal event", "error", err)
-			eventsFailedTotal.WithLabelValues("marshal_error").Inc()
-			return
-		}
-		wrapper, err := json.Marshal(eventWithTime{Time: eventTime(event), Level: eventLevel(event.Type), Event: json.RawMessage(j)})
-		if err != nil {
-			slog.Error("Failed to marshal event wrapper", "error", err)
-			eventsFailedTotal.WithLabelValues("marshal_error").Inc()
-			return
-		}
-		loggerEvent.Printf("%s\n", string(wrapper))
-		eventsTotal.WithLabelValues(event.Type).Inc()
-		if enableDetailedMetrics {
-			eventsByNamespaceTotal.WithLabelValues(event.InvolvedObject.Namespace).Inc()
-			eventsByReasonTotal.WithLabelValues(event.Reason).Inc()
-			eventsByObjectKindTotal.WithLabelValues(event.InvolvedObject.Kind).Inc()
-		}
-		lastEventTimestamp.SetToCurrentTime()
-		eventProcessingDuration.Observe(time.Since(start).Seconds())
-	}
-
-	// Use the informer that was already started and synced in main()
-	factory := informers.NewSharedInformerFactory(clientset, 0)
-	defer factory.Shutdown()
-	eventInformer := factory.Core().V1().Events().Informer()
-
-	_, err := eventInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc: logEvent,
-		UpdateFunc: func(_, newObj interface{}) {
-			logEvent(newObj)
-		},
-	})
-	if err != nil {
-		slog.Error("Failed to add event handler", "error", err)
-		os.Exit(1)
-	}
-
-	factory.Start(ctx.Done())
-
-	// Cache is already synced in main(), just wait for leadership to end
-	<-ctx.Done()
-	slog.Info("Shutting down event processing.")
-}
 
 func eventTime(event *v1.Event) time.Time {
 	if !event.EventTime.IsZero() {
