@@ -320,7 +320,6 @@ func main() {
 	wg.Wait()
 }
 
-
 func eventTime(event *v1.Event) time.Time {
 	if !event.EventTime.IsZero() {
 		return event.EventTime.Time

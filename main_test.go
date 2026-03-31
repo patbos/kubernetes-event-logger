@@ -2067,4 +2067,3 @@ func TestEventLogEntryFormat(t *testing.T) {
 		t.Errorf("involvedObject.name = %v, want 'test-pod'", involvedObject["name"])
 	}
 }
-
