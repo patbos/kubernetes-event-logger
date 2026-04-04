@@ -134,9 +134,9 @@ func main() {
 	leaseDuration := flag.Duration("lease-duration", 15*time.Second, "duration a leader lease is valid before another candidate can take over")
 	renewDeadline := flag.Duration("renew-deadline", 10*time.Second, "duration the leader has to renew the lease before losing it")
 	retryPeriod := flag.Duration("retry-period", 2*time.Second, "how often candidates retry acquiring or renewing the lease")
-	enableDetailedMetrics := flag.Bool("enable-detailed-metrics", false, "enable high-cardinality metrics (events by namespace and reason)")
+	enableDetailedMetrics := flag.Bool("enable-detailed-metrics", false, "enable high-cardinality metrics (events by namespace, reason, and object kind)")
 	var excludeFilters eventFilters
-	flag.Var(&excludeFilters, "exclude-filter", "exclude events matching all clauses in a rule; repeatable, format: field=value[,field=value] with fields namespace,kind,name,reason,type,reporting-component,source-component")
+	flag.Var(&excludeFilters, "exclude-filter", "exclude events matching all clauses in a rule; repeatable, format: field=value[,field=value] with fields namespace,kind,name,reason,type,reporting-component,reporting-controller,source-component")
 	flag.Parse()
 
 	loggerEvent := log.New(os.Stdout, "", 0)
