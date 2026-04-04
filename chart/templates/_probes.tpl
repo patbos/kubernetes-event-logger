@@ -1,6 +1,6 @@
 {{/*
 Render an HTTP probe configuration block.
-Usage: {{ include "kubernetes-event-logger.httpProbe" (dict "config" .Values.livenessProbe "port" .Values.port.containerPort "path" "/health") | nindent 10 }}
+Usage: {{ include "kubernetes-event-logger.httpProbe" (dict "config" .Values.livenessProbe "port" .Values.port.containerPort "path" "/healthz") | nindent 10 }}
 */}}
 {{- define "kubernetes-event-logger.httpProbe" -}}
 httpGet:

@@ -8,7 +8,7 @@ A lightweight Kubernetes event logger that watches cluster events and writes new
 
 ## Overview
 
-`kubernetes-event-logger` watches `core/v1` `Event` resources across the cluster and emits them in a log-friendly JSON envelope. It ignores historical events that already existed before the active leader began processing, supports repeated exclusion rules, and exposes Prometheus metrics plus an HTTP health endpoint on port `8080`.
+`kubernetes-event-logger` watches `core/v1` `Event` resources across the cluster and emits them in a log-friendly JSON envelope. It ignores historical events that already existed before the active leader began processing, supports repeated exclusion rules, and exposes Prometheus metrics plus HTTP health endpoints on port `8080`.
 
 The binary is intended to run either:
 
@@ -203,7 +203,7 @@ Common chart values:
 | `image.repository` | Container image repository | `ghcr.io/patbos/kubernetes-event-logger` |
 | `image.tag` | Image tag; falls back to chart `appVersion` | `""` |
 | `image.digest` | Immutable image digest; when set, the chart renders `repository[:tag]@digest` | `""` |
-| `image.pullPolicy` | Image pull policy | `Always` |
+| `image.pullPolicy` | Image pull policy | `IfNotPresent` |
 | `serviceAccount.create` | Create a dedicated ServiceAccount for this release | `true` |
 | `serviceAccount.name` | ServiceAccount name override; required when `serviceAccount.create=false` | `""` |
 | `excludeFilters` | List of event exclusion rules | `[]` |
@@ -260,8 +260,8 @@ The process listens on port `8080`.
 | Path | Purpose |
 |---|---|
 | `/metrics` | Prometheus metrics |
-| `/healthz` | JSON liveness response |
-| `/readyz` | JSON readiness response |
+| `/healthz` | JSON health response used by the liveness probe |
+| `/readyz` | JSON health response used by the readiness probe |
 
 Example `/healthz` response:
 
@@ -275,7 +275,7 @@ Example `/healthz` response:
 }
 ```
 
-Both endpoints return HTTP `503` until informer cache sync completes. Non-leader replicas still report healthy once synced because they are ready to take over.
+Both endpoints currently return the same JSON payload and status code. They return HTTP `503` until informer cache sync completes. Non-leader replicas still report healthy once synced because they are ready to take over.
 
 ## Metrics
 
