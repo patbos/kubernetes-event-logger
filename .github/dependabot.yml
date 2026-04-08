@@ -17,7 +17,7 @@ updates:
   - package-ecosystem: docker
     directory: /
     schedule:
-      interval: weekly
+      interval: daily
     # Check base image for security updates
     open-pull-requests-limit: 5
 
@@ -25,6 +25,6 @@ updates:
   - package-ecosystem: github-actions
     directory: /
     schedule:
-      interval: weekly
+      interval: daily
     open-pull-requests-limit: 5
 
