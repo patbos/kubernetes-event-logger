@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -12,6 +14,58 @@ import (
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
+
+type fakeEventProcessorMetrics struct {
+	loggedEvents    []*v1.Event
+	detailedMetrics []bool
+	filtered        map[string]int
+	failed          map[string]int
+	durations       []time.Duration
+}
+
+func newFakeEventProcessorMetrics() *fakeEventProcessorMetrics {
+	return &fakeEventProcessorMetrics{
+		filtered: map[string]int{},
+		failed:   map[string]int{},
+	}
+}
+
+func (m *fakeEventProcessorMetrics) eventLogged(event *v1.Event, detailedMetrics bool) {
+	m.loggedEvents = append(m.loggedEvents, event)
+	m.detailedMetrics = append(m.detailedMetrics, detailedMetrics)
+}
+
+func (m *fakeEventProcessorMetrics) eventFiltered(filterType string) {
+	m.filtered[filterType]++
+}
+
+func (m *fakeEventProcessorMetrics) eventFailed(reason string) {
+	m.failed[reason]++
+}
+
+func (m *fakeEventProcessorMetrics) observeProcessingDuration(duration time.Duration) {
+	m.durations = append(m.durations, duration)
+}
+
+func newTestEventProcessor(
+	leaderStatus leaderStatusFunc,
+	excludeFilters eventFilters,
+	detailedMetrics bool,
+	metrics *fakeEventProcessorMetrics,
+	output *bytes.Buffer,
+) *eventProcessor {
+	return &eventProcessor{
+		leaderStatus:    leaderStatus,
+		excludeFilters:  excludeFilters,
+		logger:          log.New(output, "", 0),
+		detailedMetrics: detailedMetrics,
+		metrics:         metrics,
+		marshal:         json.Marshal,
+		now: func() time.Time {
+			return time.Unix(100, 0).UTC()
+		},
+	}
+}
 
 func TestEventTime(t *testing.T) {
 	now := time.Now().UTC()
@@ -186,6 +240,389 @@ func TestIsHistorical(t *testing.T) {
 				t.Fatalf("isHistorical() = %v, want %v", got, tc.expected)
 			}
 		})
+	}
+}
+
+func TestEventProcessorProcessesLeaderEvent(t *testing.T) {
+	var output bytes.Buffer
+	metrics := newFakeEventProcessorMetrics()
+	leaderStart := time.Unix(100, 0).UTC()
+	eventTime := leaderStart.Add(time.Second)
+	event := &v1.Event{
+		InvolvedObject: v1.ObjectReference{
+			Namespace: "default",
+			Kind:      "Pod",
+			Name:      "pod-1",
+		},
+		Reason:    "Started",
+		Type:      "Normal",
+		EventTime: metav1.MicroTime{Time: eventTime},
+	}
+	processor := newTestEventProcessor(
+		func() (bool, time.Time) { return true, leaderStart },
+		nil,
+		true,
+		metrics,
+		&output,
+	)
+
+	processor.process(event)
+
+	if len(metrics.loggedEvents) != 1 {
+		t.Fatalf("logged events = %d, want 1", len(metrics.loggedEvents))
+	}
+	if !metrics.detailedMetrics[0] {
+		t.Fatal("detailedMetrics = false, want true")
+	}
+	if len(metrics.durations) != 1 {
+		t.Fatalf("durations = %d, want 1", len(metrics.durations))
+	}
+	if output.Len() == 0 {
+		t.Fatal("processor did not write log output")
+	}
+
+	var entry eventLogEntry
+	if err := json.Unmarshal(bytes.TrimSpace(output.Bytes()), &entry); err != nil {
+		t.Fatalf("failed to unmarshal log output: %v", err)
+	}
+	if entry.Level != "info" {
+		t.Fatalf("entry.Level = %q, want info", entry.Level)
+	}
+	if !entry.Time.Equal(eventTime) {
+		t.Fatalf("entry.Time = %v, want %v", entry.Time, eventTime)
+	}
+	if entry.Event == nil || entry.Event.Reason != "Started" {
+		t.Fatalf("entry.Event.Reason = %v, want Started", entry.Event)
+	}
+}
+
+func TestEventProcessorSkipsWhenNotLeader(t *testing.T) {
+	var output bytes.Buffer
+	metrics := newFakeEventProcessorMetrics()
+	processor := newTestEventProcessor(
+		func() (bool, time.Time) { return false, time.Now() },
+		nil,
+		false,
+		metrics,
+		&output,
+	)
+
+	processor.process(&v1.Event{Type: "Normal"})
+
+	if output.Len() != 0 {
+		t.Fatalf("log output length = %d, want 0", output.Len())
+	}
+	if len(metrics.loggedEvents) != 0 {
+		t.Fatalf("logged events = %d, want 0", len(metrics.loggedEvents))
+	}
+}
+
+func TestEventProcessorIgnoresNonEventObjects(t *testing.T) {
+	var output bytes.Buffer
+	metrics := newFakeEventProcessorMetrics()
+	processor := newTestEventProcessor(
+		func() (bool, time.Time) { return true, time.Unix(100, 0).UTC() },
+		nil,
+		false,
+		metrics,
+		&output,
+	)
+
+	processor.process("not a kubernetes event")
+
+	if output.Len() != 0 {
+		t.Fatalf("log output length = %d, want 0", output.Len())
+	}
+	if len(metrics.loggedEvents) != 0 {
+		t.Fatalf("logged events = %d, want 0", len(metrics.loggedEvents))
+	}
+	if len(metrics.filtered) != 0 {
+		t.Fatalf("filtered metrics = %v, want none", metrics.filtered)
+	}
+	if len(metrics.failed) != 0 {
+		t.Fatalf("failed metrics = %v, want none", metrics.failed)
+	}
+	if len(metrics.durations) != 0 {
+		t.Fatalf("durations = %d, want 0", len(metrics.durations))
+	}
+}
+
+func TestEventProcessorPreservesDetailedMetricsFlag(t *testing.T) {
+	var output bytes.Buffer
+	metrics := newFakeEventProcessorMetrics()
+	leaderStart := time.Unix(100, 0).UTC()
+	processor := newTestEventProcessor(
+		func() (bool, time.Time) { return true, leaderStart },
+		nil,
+		false,
+		metrics,
+		&output,
+	)
+
+	processor.process(&v1.Event{
+		Type:      "Warning",
+		EventTime: metav1.MicroTime{Time: leaderStart.Add(time.Second)},
+	})
+
+	if len(metrics.loggedEvents) != 1 {
+		t.Fatalf("logged events = %d, want 1", len(metrics.loggedEvents))
+	}
+	if metrics.detailedMetrics[0] {
+		t.Fatal("detailedMetrics = true, want false")
+	}
+}
+
+func TestEventProcessorObservesProcessingDuration(t *testing.T) {
+	var output bytes.Buffer
+	metrics := newFakeEventProcessorMetrics()
+	leaderStart := time.Unix(100, 0).UTC()
+	processor := newTestEventProcessor(
+		func() (bool, time.Time) { return true, leaderStart },
+		nil,
+		false,
+		metrics,
+		&output,
+	)
+	call := 0
+	processor.now = func() time.Time {
+		call++
+		if call == 1 {
+			return time.Unix(200, 0).UTC()
+		}
+		return time.Unix(202, 0).UTC()
+	}
+
+	processor.process(&v1.Event{
+		Type:      "Normal",
+		EventTime: metav1.MicroTime{Time: leaderStart.Add(time.Second)},
+	})
+
+	if len(metrics.durations) != 1 {
+		t.Fatalf("durations = %d, want 1", len(metrics.durations))
+	}
+	if metrics.durations[0] != 2*time.Second {
+		t.Fatalf("duration = %v, want 2s", metrics.durations[0])
+	}
+}
+
+func TestEventProcessorPassesExpectedEntryToMarshal(t *testing.T) {
+	var output bytes.Buffer
+	metrics := newFakeEventProcessorMetrics()
+	leaderStart := time.Unix(100, 0).UTC()
+	eventTime := leaderStart.Add(time.Second)
+	event := &v1.Event{
+		Type:      "Warning",
+		Reason:    "BackOff",
+		EventTime: metav1.MicroTime{Time: eventTime},
+	}
+	processor := newTestEventProcessor(
+		func() (bool, time.Time) { return true, leaderStart },
+		nil,
+		false,
+		metrics,
+		&output,
+	)
+	marshalCalled := false
+	processor.marshal = func(v any) ([]byte, error) {
+		marshalCalled = true
+		entry, ok := v.(eventLogEntry)
+		if !ok {
+			t.Fatalf("marshal input type = %T, want eventLogEntry", v)
+		}
+		if !entry.Time.Equal(eventTime) {
+			t.Fatalf("entry.Time = %v, want %v", entry.Time, eventTime)
+		}
+		if entry.Level != "warn" {
+			t.Fatalf("entry.Level = %q, want warn", entry.Level)
+		}
+		if entry.Event != event {
+			t.Fatal("entry.Event did not preserve original event pointer")
+		}
+		return []byte(`{"ok":true}`), nil
+	}
+
+	processor.process(event)
+
+	if !marshalCalled {
+		t.Fatal("marshal was not called")
+	}
+	if got := output.String(); got != "{\"ok\":true}\n" {
+		t.Fatalf("log output = %q, want fixed marshaled payload with newline", got)
+	}
+	if len(metrics.loggedEvents) != 1 {
+		t.Fatalf("logged events = %d, want 1", len(metrics.loggedEvents))
+	}
+}
+
+func TestEventProcessorDoesNotMarshalFilteredEvents(t *testing.T) {
+	leaderStart := time.Unix(100, 0).UTC()
+	testCases := []struct {
+		name           string
+		event          *v1.Event
+		excludeFilters eventFilters
+		filterType     string
+	}{
+		{
+			name: "historical",
+			event: &v1.Event{
+				Type:      "Normal",
+				EventTime: metav1.MicroTime{Time: leaderStart},
+			},
+			filterType: "historical",
+		},
+		{
+			name: "excluded filter",
+			event: &v1.Event{
+				InvolvedObject: v1.ObjectReference{Kind: "Node"},
+				Type:           "Normal",
+				EventTime:      metav1.MicroTime{Time: leaderStart.Add(time.Second)},
+			},
+			excludeFilters: eventFilters{{Kind: "Node"}},
+			filterType:     "excluded_filter",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			var output bytes.Buffer
+			metrics := newFakeEventProcessorMetrics()
+			processor := newTestEventProcessor(
+				func() (bool, time.Time) { return true, leaderStart },
+				tc.excludeFilters,
+				false,
+				metrics,
+				&output,
+			)
+			processor.marshal = func(any) ([]byte, error) {
+				t.Fatal("marshal should not be called for filtered events")
+				return nil, nil
+			}
+
+			processor.process(tc.event)
+
+			if metrics.filtered[tc.filterType] != 1 {
+				t.Fatalf("%s filtered count = %d, want 1", tc.filterType, metrics.filtered[tc.filterType])
+			}
+			if output.Len() != 0 {
+				t.Fatalf("log output length = %d, want 0", output.Len())
+			}
+			if len(metrics.loggedEvents) != 0 {
+				t.Fatalf("logged events = %d, want 0", len(metrics.loggedEvents))
+			}
+			if len(metrics.durations) != 0 {
+				t.Fatalf("durations = %d, want 0", len(metrics.durations))
+			}
+		})
+	}
+}
+
+func TestEventProcessorFiltersHistoricalEvents(t *testing.T) {
+	var output bytes.Buffer
+	metrics := newFakeEventProcessorMetrics()
+	leaderStart := time.Unix(100, 0).UTC()
+	processor := newTestEventProcessor(
+		func() (bool, time.Time) { return true, leaderStart },
+		nil,
+		false,
+		metrics,
+		&output,
+	)
+
+	processor.process(&v1.Event{
+		Type:      "Normal",
+		EventTime: metav1.MicroTime{Time: leaderStart},
+	})
+
+	if metrics.filtered["historical"] != 1 {
+		t.Fatalf("historical filtered count = %d, want 1", metrics.filtered["historical"])
+	}
+	if output.Len() != 0 {
+		t.Fatalf("log output length = %d, want 0", output.Len())
+	}
+}
+
+func TestEventProcessorAppliesExcludeFilters(t *testing.T) {
+	var output bytes.Buffer
+	metrics := newFakeEventProcessorMetrics()
+	leaderStart := time.Unix(100, 0).UTC()
+	processor := newTestEventProcessor(
+		func() (bool, time.Time) { return true, leaderStart },
+		eventFilters{{Namespace: "kube-system", Type: "Normal"}},
+		false,
+		metrics,
+		&output,
+	)
+
+	processor.process(&v1.Event{
+		InvolvedObject: v1.ObjectReference{Namespace: "kube-system"},
+		Type:           "Normal",
+		EventTime:      metav1.MicroTime{Time: leaderStart.Add(time.Second)},
+	})
+
+	if metrics.filtered["excluded_filter"] != 1 {
+		t.Fatalf("excluded_filter count = %d, want 1", metrics.filtered["excluded_filter"])
+	}
+	if output.Len() != 0 {
+		t.Fatalf("log output length = %d, want 0", output.Len())
+	}
+}
+
+func TestEventProcessorRecordsMarshalFailures(t *testing.T) {
+	var output bytes.Buffer
+	metrics := newFakeEventProcessorMetrics()
+	leaderStart := time.Unix(100, 0).UTC()
+	processor := newTestEventProcessor(
+		func() (bool, time.Time) { return true, leaderStart },
+		nil,
+		false,
+		metrics,
+		&output,
+	)
+	processor.marshal = func(any) ([]byte, error) {
+		return nil, errors.New("marshal failed")
+	}
+
+	processor.process(&v1.Event{
+		Type:      "Warning",
+		EventTime: metav1.MicroTime{Time: leaderStart.Add(time.Second)},
+	})
+
+	if metrics.failed["marshal_error"] != 1 {
+		t.Fatalf("marshal_error count = %d, want 1", metrics.failed["marshal_error"])
+	}
+	if output.Len() != 0 {
+		t.Fatalf("log output length = %d, want 0", output.Len())
+	}
+	if len(metrics.loggedEvents) != 0 {
+		t.Fatalf("logged events = %d, want 0", len(metrics.loggedEvents))
+	}
+	if len(metrics.durations) != 0 {
+		t.Fatalf("durations = %d, want 0", len(metrics.durations))
+	}
+}
+
+func TestCurrentLeaderStatusReadsHealthState(t *testing.T) {
+	originalIsLeader, originalLeaderStartTime := currentLeaderStatus()
+	defer func() {
+		healthState.Lock()
+		healthState.isLeader = originalIsLeader
+		healthState.leaderStartTime = originalLeaderStartTime
+		healthState.Unlock()
+	}()
+
+	expectedLeaderStartTime := time.Unix(300, 0).UTC()
+	healthState.Lock()
+	healthState.isLeader = true
+	healthState.leaderStartTime = expectedLeaderStartTime
+	healthState.Unlock()
+
+	isLeader, leaderStartTime := currentLeaderStatus()
+
+	if !isLeader {
+		t.Fatal("isLeader = false, want true")
+	}
+	if !leaderStartTime.Equal(expectedLeaderStartTime) {
+		t.Fatalf("leaderStartTime = %v, want %v", leaderStartTime, expectedLeaderStartTime)
 	}
 }
 
