@@ -478,7 +478,7 @@ func TestHandleHealthLeaderTransition(t *testing.T) {
 	healthState.Unlock()
 
 	// Second request: leader
-	req = httptest.NewRequest("GET", "/healthz", nil)
+	req = httptest.NewRequestWithContext(context.Background(), "GET", "/healthz", nil)
 	w = httptest.NewRecorder()
 	handleHealth(w, req)
 	if !contains(w.Body.String(), `"leader":true`) {
