@@ -59,3 +59,13 @@ linters:
 issues:
   max-issues-per-linter: 0
   max-same-issues: 0
+
+formatters:
+  enable:
+    - gci           # Import grouping and ordering
+  settings:
+    gci:
+      sections:
+        - standard
+        - default
+        - prefix(kubernetes-event-logger)
