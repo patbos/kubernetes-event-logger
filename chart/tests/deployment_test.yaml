@@ -115,6 +115,20 @@ tests:
           value: 30
 
   # Leader election args
+  - it: should pass lease name arg matching fullname
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: -lease-name=RELEASE-NAME-kubernetes-event-logger
+
+  - it: should pass lease name arg with fullnameOverride
+    set:
+      fullnameOverride: my-custom-name
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: -lease-name=my-custom-name
+
   - it: should pass lease duration arg
     asserts:
       - contains:
