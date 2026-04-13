@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -196,7 +197,7 @@ func TestHandleHealthLeader(t *testing.T) {
 	healthState.startTime = time.Now().Add(-10 * time.Second)
 	healthState.Unlock()
 
-	req := httptest.NewRequest("GET", "/healthz", nil)
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/healthz", nil)
 	w := httptest.NewRecorder()
 
 	handleHealth(w, req)
@@ -235,7 +236,7 @@ func TestHandleHealthNonLeader(t *testing.T) {
 	healthState.startTime = time.Now().Add(-5 * time.Second)
 	healthState.Unlock()
 
-	req := httptest.NewRequest("GET", "/healthz", nil)
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/healthz", nil)
 	w := httptest.NewRecorder()
 
 	handleHealth(w, req)
@@ -262,7 +263,7 @@ func TestHandleHealthNotReady(t *testing.T) {
 	healthState.startTime = time.Now()
 	healthState.Unlock()
 
-	req := httptest.NewRequest("GET", "/healthz", nil)
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/healthz", nil)
 	w := httptest.NewRecorder()
 
 	handleHealth(w, req)
@@ -286,7 +287,7 @@ func TestHandleHealthContentType(t *testing.T) {
 	healthState.cacheSynced = true
 	healthState.Unlock()
 
-	req := httptest.NewRequest("GET", "/healthz", nil)
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/healthz", nil)
 	w := httptest.NewRecorder()
 
 	handleHealth(w, req)
@@ -353,7 +354,7 @@ func TestHandleHealthUptime(t *testing.T) {
 	healthState.startTime = startTime
 	healthState.Unlock()
 
-	req := httptest.NewRequest("GET", "/healthz", nil)
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/healthz", nil)
 	w := httptest.NewRecorder()
 
 	handleHealth(w, req)
@@ -373,7 +374,7 @@ func TestHandleHealthUptimeZero(t *testing.T) {
 	healthState.startTime = time.Now()
 	healthState.Unlock()
 
-	req := httptest.NewRequest("GET", "/healthz", nil)
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/healthz", nil)
 	w := httptest.NewRecorder()
 
 	handleHealth(w, req)
@@ -464,7 +465,7 @@ func TestHandleHealthLeaderTransition(t *testing.T) {
 	healthState.Unlock()
 
 	// First request: non-leader
-	req := httptest.NewRequest("GET", "/healthz", nil)
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/healthz", nil)
 	w := httptest.NewRecorder()
 	handleHealth(w, req)
 	if !contains(w.Body.String(), `"leader":false`) {
@@ -626,7 +627,7 @@ func TestHandleHealthResponseStructure(t *testing.T) {
 	healthState.startTime = time.Now().Add(-5 * time.Second)
 	healthState.Unlock()
 
-	req := httptest.NewRequest("GET", "/healthz", nil)
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/healthz", nil)
 	w := httptest.NewRecorder()
 
 	handleHealth(w, req)
@@ -671,7 +672,7 @@ func TestHandleHealthStatusCodeNotReady(t *testing.T) {
 			healthState.cacheSynced = tc.cacheSynced
 			healthState.Unlock()
 
-			req := httptest.NewRequest("GET", "/healthz", nil)
+			req := httptest.NewRequestWithContext(context.Background(), "GET", "/healthz", nil)
 			w := httptest.NewRecorder()
 
 			handleHealth(w, req)
@@ -694,7 +695,7 @@ func TestHandleHealthConcurrency(t *testing.T) {
 	done := make(chan bool, 10)
 	for i := 0; i < 10; i++ {
 		go func() {
-			req := httptest.NewRequest("GET", "/healthz", nil)
+			req := httptest.NewRequestWithContext(context.Background(), "GET", "/healthz", nil)
 			w := httptest.NewRecorder()
 			handleHealth(w, req)
 			if w.Code != http.StatusOK {
@@ -830,7 +831,7 @@ func TestHandleHealthLeadershipStates(t *testing.T) {
 			healthState.cacheSynced = tc.cacheSynced
 			healthState.Unlock()
 
-			req := httptest.NewRequest("GET", "/healthz", nil)
+			req := httptest.NewRequestWithContext(context.Background(), "GET", "/healthz", nil)
 			w := httptest.NewRecorder()
 			handleHealth(w, req)
 
@@ -855,7 +856,7 @@ func TestHandleHealthVersionReported(t *testing.T) {
 	healthState.cacheSynced = true
 	healthState.Unlock()
 
-	req := httptest.NewRequest("GET", "/healthz", nil)
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/healthz", nil)
 	w := httptest.NewRecorder()
 	handleHealth(w, req)
 
@@ -1157,7 +1158,7 @@ func TestHandleHealthHTTPMethods(t *testing.T) {
 	healthState.Unlock()
 
 	// Health endpoint should handle GET requests
-	req := httptest.NewRequest("GET", "/healthz", nil)
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/healthz", nil)
 	w := httptest.NewRecorder()
 	handleHealth(w, req)
 
@@ -1174,7 +1175,7 @@ func TestHandleHealthMultipleCalls(t *testing.T) {
 	healthState.Unlock()
 
 	for i := 0; i < 5; i++ {
-		req := httptest.NewRequest("GET", "/healthz", nil)
+		req := httptest.NewRequestWithContext(context.Background(), "GET", "/healthz", nil)
 		w := httptest.NewRecorder()
 		handleHealth(w, req)
 
@@ -1270,7 +1271,7 @@ func TestHandleHealthConsistency(t *testing.T) {
 	// Make multiple requests and verify consistency
 	responses := make([]string, 3)
 	for i := 0; i < 3; i++ {
-		req := httptest.NewRequest("GET", "/healthz", nil)
+		req := httptest.NewRequestWithContext(context.Background(), "GET", "/healthz", nil)
 		w := httptest.NewRecorder()
 		handleHealth(w, req)
 		responses[i] = w.Body.String()
@@ -1527,7 +1528,7 @@ func TestHandleHealthJSONValid(t *testing.T) {
 	healthState.startTime = time.Now().Add(-5 * time.Second)
 	healthState.Unlock()
 
-	req := httptest.NewRequest("GET", "/healthz", nil)
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/healthz", nil)
 	w := httptest.NewRecorder()
 	handleHealth(w, req)
 
@@ -1856,7 +1857,7 @@ func TestHealthEndpointJSONStructure(t *testing.T) {
 	healthState.startTime = time.Now().Add(-10 * time.Second)
 	healthState.Unlock()
 
-	req := httptest.NewRequest("GET", "/healthz", nil)
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/healthz", nil)
 	w := httptest.NewRecorder()
 	handleHealth(w, req)
 
