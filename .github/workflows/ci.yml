@@ -41,6 +41,17 @@ jobs:
             exit 1
           fi
 
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@adc32bda5f3ee528f9b3f5e0f6b4bda0c4df8458  # v6
+        with:
+          version: latest
+          args: --timeout=5m
+
+      - name: Lint Dockerfile
+        uses: hadolint/hadolint-action@54c9aaf53bf0b0a309fb0080db406feca8568370  # v3.1.0
+        with:
+          dockerfile: Dockerfile
+
       - name: Run unit tests
         run: go test ./...
 
