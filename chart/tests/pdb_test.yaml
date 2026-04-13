@@ -1,0 +1,40 @@
+suite: pod disruption budget
+templates:
+  - poddisruptionbudget.yaml
+tests:
+  - it: should render PDB with default values (enabled, 2 replicas)
+    asserts:
+      - isKind:
+          of: PodDisruptionBudget
+      - hasDocuments:
+          count: 1
+
+  - it: should set minAvailable from values
+    asserts:
+      - equal:
+          path: spec.minAvailable
+          value: 1
+
+  - it: should not render when disabled
+    set:
+      podDisruptionBudget.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: should not render with a single replica even when enabled
+    set:
+      replicaCount: 1
+      podDisruptionBudget.enabled: true
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: should use configured minAvailable in HA setup
+    set:
+      replicaCount: 3
+      podDisruptionBudget.minAvailable: 2
+    asserts:
+      - equal:
+          path: spec.minAvailable
+          value: 2

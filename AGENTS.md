@@ -11,6 +11,15 @@ This repository is intentionally small. `main.go` contains the application entry
 - `./kubernetes-event-logger -exclude-filter=kind=Node,type=Normal`: run locally with an exclusion rule to validate filter behavior.
 - `docker build -t kubernetes-event-logger .`: build the container image from the multi-stage `Dockerfile`.
 - `helm lint chart`: validate Helm chart structure before opening a PR.
+- `helm unittest chart`: run the Helm chart unit test suite (requires the `helm-unittest` plugin: `helm plugin install https://github.com/helm-unittest/helm-unittest`). Tests live in `chart/tests/*_test.yaml` and cover template rendering, security contexts, resource limits, and optional features. Runs automatically in GitHub Actions CI on chart changes.
+
+## Testing & CI/CD
+All chart changes trigger automated validation via GitHub Actions (`.github/workflows/ci.yml`):
+- Go formatting and unit tests
+- Helm lint validation
+- Helm chart unit tests (`helm unittest chart`)
+
+Tests must pass before merging to `main`. Run locally before opening PRs to catch issues early.
 
 ## Coding Style & Naming Conventions
 Use standard Go formatting and imports; run `gofmt -w` on changed Go files before committing. Run `golangci-lint run ./...` to catch security issues, unchecked errors, and code quality problems before opening a PR. Follow existing Go naming: exported identifiers use `CamelCase`, internal helpers use `camelCase`, and flags use kebab-case such as `-exclude-filter`. Keep new logic in small helper functions rather than growing `main()` further. For Helm templates, preserve the current lowercase dashed resource naming and values structure.

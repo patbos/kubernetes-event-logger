@@ -329,16 +329,79 @@ Example:
 
 ## Development
 
+### Setup
+
+Install the following tools before building, testing, or linting:
+
+**Go** (1.26.2+)
+
+Follow the [official installation guide](https://go.dev/doc/install).
+
+**golangci-lint** (v2)
+
+```bash
+go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.11.4
+```
+
+**Helm**
+
+Follow the [official installation guide](https://helm.sh/docs/intro/install/).
+
+**helm-unittest plugin**
+
+```bash
+helm plugin install https://github.com/helm-unittest/helm-unittest
+```
+
+**hadolint** (Dockerfile linter)
+
+```bash
+# macOS
+brew install hadolint
+
+# Linux
+wget -O /usr/local/bin/hadolint https://github.com/hadolint/hadolint/releases/latest/download/hadolint-Linux-x86_64
+chmod +x /usr/local/bin/hadolint
+```
+
+**Docker** — required for container image builds only. Follow the [official installation guide](https://docs.docker.com/get-docker/).
+
+### Running all validations
+
+```bash
+make all
+```
+
+This runs formatting check, lint, Go tests, Helm lint, and Helm unit tests — matching what CI runs on every push.
+
+Individual targets:
+
+```bash
+make fmt-check     # check Go formatting
+make lint          # run golangci-lint
+make test          # run Go unit tests
+make helm-lint     # lint the Helm chart
+make helm-test     # run Helm chart unit tests
+make dockerfile-lint  # lint the Dockerfile with hadolint
+make validate      # all of the above including dockerfile-lint
+make build         # build the binary
+make docker-build  # build the container image
+make fmt           # format Go files in place
+make clean         # remove the built binary
+```
+
 ### Build
 
 ```bash
-go build -o kubernetes-event-logger .
+make build
+# or: go build -o kubernetes-event-logger .
 ```
 
 ### Test
 
 ```bash
-go test ./...
+make test
+# or: go test ./...
 ```
 
 Current automated tests cover event filter parsing and matching, health endpoint behavior, timestamp selection, and related helper logic in `filters_test.go` and `main_test.go`.
@@ -346,7 +409,8 @@ Current automated tests cover event filter parsing and matching, health endpoint
 ### Lint
 
 ```bash
-golangci-lint run ./...
+make lint
+# or: golangci-lint run ./...
 ```
 
 Static analysis and security linting checks for:
@@ -356,21 +420,20 @@ Static analysis and security linting checks for:
 - Code simplifications and inefficiencies
 - Context and error handling issues
 
-The linter runs automatically in CI. Install locally with:
-```bash
-go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
-```
-
 ### Helm Validation
 
 ```bash
-helm lint chart
+make helm-lint helm-test
+# or: helm lint chart && helm unittest chart
 ```
+
+Helm unit tests live in `chart/tests/*_test.yaml`.
 
 ### Container Build
 
 ```bash
-docker build -t kubernetes-event-logger .
+make docker-build
+# or: docker build -t kubernetes-event-logger .
 ```
 
 The Docker image uses a multi-stage build and a distroless runtime image.

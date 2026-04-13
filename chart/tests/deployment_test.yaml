@@ -1,0 +1,191 @@
+suite: deployment
+templates:
+  - deployment.yaml
+tests:
+  - it: should render one Deployment
+    asserts:
+      - isKind:
+          of: Deployment
+      - hasDocuments:
+          count: 1
+
+  - it: should use default replica count of 2
+    asserts:
+      - equal:
+          path: spec.replicas
+          value: 2
+
+  - it: should use configured replica count
+    set:
+      replicaCount: 3
+    asserts:
+      - equal:
+          path: spec.replicas
+          value: 3
+
+  # Pod security context
+  - it: should enforce runAsNonRoot
+    asserts:
+      - equal:
+          path: spec.template.spec.securityContext.runAsNonRoot
+          value: true
+
+  - it: should run as user 65532
+    asserts:
+      - equal:
+          path: spec.template.spec.securityContext.runAsUser
+          value: 65532
+
+  - it: should run as group 65532
+    asserts:
+      - equal:
+          path: spec.template.spec.securityContext.runAsGroup
+          value: 65532
+
+  # Container security context
+  - it: should disallow privilege escalation
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.allowPrivilegeEscalation
+          value: false
+
+  - it: should use read-only root filesystem
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.readOnlyRootFilesystem
+          value: true
+
+  - it: should drop all capabilities
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].securityContext.capabilities.drop
+          content: ALL
+
+  - it: should use RuntimeDefault seccomp profile
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.seccompProfile.type
+          value: RuntimeDefault
+
+  # Resources
+  - it: should set CPU request to 50m
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].resources.requests.cpu
+          value: 50m
+
+  - it: should set memory request to 64Mi
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].resources.requests.memory
+          value: 64Mi
+
+  - it: should set CPU limit to 500m
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].resources.limits.cpu
+          value: 500m
+
+  - it: should set memory limit to 512Mi
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].resources.limits.memory
+          value: 512Mi
+
+  # Rolling update strategy
+  - it: should use RollingUpdate strategy
+    asserts:
+      - equal:
+          path: spec.strategy.type
+          value: RollingUpdate
+
+  - it: should replace one pod at a time with no surge
+    asserts:
+      - equal:
+          path: spec.strategy.rollingUpdate.maxSurge
+          value: 0
+      - equal:
+          path: spec.strategy.rollingUpdate.maxUnavailable
+          value: 1
+
+  - it: should set termination grace period to 30 seconds
+    asserts:
+      - equal:
+          path: spec.template.spec.terminationGracePeriodSeconds
+          value: 30
+
+  # Leader election args
+  - it: should pass lease duration arg
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: -lease-duration=15s
+
+  - it: should pass renew deadline arg
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: -renew-deadline=10s
+
+  - it: should pass retry period arg
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: -retry-period=2s
+
+  # Optional flags
+  - it: should not include detailed metrics flag by default
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].args
+          content: -enable-detailed-metrics
+
+  - it: should include detailed metrics flag when enabled
+    set:
+      enableDetailedMetrics: true
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: -enable-detailed-metrics
+
+  - it: should pass exclude filter args
+    set:
+      excludeFilters:
+        - kind: Node
+          type: Normal
+        - namespace: kube-system
+          reason: Scheduled
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: -exclude-filter=kind=Node,type=Normal
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: -exclude-filter=namespace=kube-system,reason=Scheduled
+
+  # Env vars
+  - it: should inject POD_NAMESPACE from downward API
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: POD_NAMESPACE
+            valueFrom:
+              fieldRef:
+                fieldPath: metadata.namespace
+
+  # Image
+  - it: should render image with chart appVersion by default
+    asserts:
+      - matchRegex:
+          path: spec.template.spec.containers[0].image
+          pattern: "ghcr.io/patbos/kubernetes-event-logger:.+"
+
+  - it: should pin image by digest when digest is set
+    set:
+      image.tag: v1.0.0
+      image.digest: sha256:abc123def456
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: ghcr.io/patbos/kubernetes-event-logger:v1.0.0@sha256:abc123def456

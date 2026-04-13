@@ -1,0 +1,55 @@
+suite: network policy
+templates:
+  - networkpolicy.yaml
+tests:
+  - it: should not render by default
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: should render NetworkPolicy when enabled
+    set:
+      networkPolicy.enabled: true
+    asserts:
+      - isKind:
+          of: NetworkPolicy
+      - hasDocuments:
+          count: 1
+
+  - it: should include both Ingress and Egress policy types
+    set:
+      networkPolicy.enabled: true
+    asserts:
+      - contains:
+          path: spec.policyTypes
+          content: Ingress
+      - contains:
+          path: spec.policyTypes
+          content: Egress
+
+  - it: should allow prometheus ingress on metrics port
+    set:
+      networkPolicy.enabled: true
+      networkPolicy.ingress.prometheus.enabled: true
+    asserts:
+      - isNotNull:
+          path: spec.ingress
+      - equal:
+          path: spec.ingress[0].ports[0].port
+          value: 8080
+
+  - it: should allow DNS egress when enabled
+    set:
+      networkPolicy.enabled: true
+      networkPolicy.egress.dns.enabled: true
+    asserts:
+      - isNotNull:
+          path: spec.egress
+
+  - it: should allow Kubernetes API egress when enabled
+    set:
+      networkPolicy.enabled: true
+      networkPolicy.egress.kubernetesAPI.enabled: true
+    asserts:
+      - isNotNull:
+          path: spec.egress
