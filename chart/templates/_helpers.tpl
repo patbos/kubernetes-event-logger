@@ -63,7 +63,7 @@ ServiceAccount name.
 Leader election Lease name.
 */}}
 {{- define "kubernetes-event-logger.leaseName" -}}
-{{- printf "kubernetes-event-logger" -}}
+{{- include "kubernetes-event-logger.fullname" . -}}
 {{- end }}
 
 {{/*

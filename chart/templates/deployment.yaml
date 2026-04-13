@@ -45,6 +45,7 @@ spec:
               containerPort: {{ .Values.port.containerPort }}
               protocol: TCP
           args:
+            - -lease-name={{ include "kubernetes-event-logger.leaseName" . }}
             - -lease-duration={{ .Values.leaderElection.leaseDuration }}
             - -renew-deadline={{ .Values.leaderElection.renewDeadline }}
             - -retry-period={{ .Values.retryPeriod | default .Values.leaderElection.retryPeriod }}

@@ -134,6 +134,7 @@ func main() {
 	leaseDuration := flag.Duration("lease-duration", 15*time.Second, "duration a leader lease is valid before another candidate can take over")
 	renewDeadline := flag.Duration("renew-deadline", 10*time.Second, "duration the leader has to renew the lease before losing it")
 	retryPeriod := flag.Duration("retry-period", 2*time.Second, "how often candidates retry acquiring or renewing the lease")
+	leaseName := flag.String("lease-name", "kubernetes-event-logger", "name of the leader election Lease resource")
 	enableDetailedMetrics := flag.Bool("enable-detailed-metrics", false, "enable high-cardinality metrics (events by namespace, reason, and object kind)")
 	var excludeFilters eventFilters
 	flag.Var(&excludeFilters, "exclude-filter", "exclude events matching all clauses in a rule; repeatable, format: field=value[,field=value] with fields namespace,kind,name,reason,type,reporting-component,reporting-controller,source-component")
@@ -171,7 +172,7 @@ func main() {
 
 	lock := &resourcelock.LeaseLock{
 		LeaseMeta: metav1.ObjectMeta{
-			Name:      "kubernetes-event-logger",
+			Name:      *leaseName,
 			Namespace: namespace,
 		},
 		Client: clientset.CoordinationV1(),

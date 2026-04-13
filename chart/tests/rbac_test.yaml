@@ -68,6 +68,22 @@ tests:
           path: rules[0].verbs
           content: update
 
+  - it: should scope lease Role to release-specific lease name
+    template: role.yaml
+    asserts:
+      - equal:
+          path: rules[0].resourceNames[0]
+          value: RELEASE-NAME-kubernetes-event-logger
+
+  - it: should scope lease Role to fullnameOverride lease name
+    template: role.yaml
+    set:
+      fullnameOverride: my-custom-name
+    asserts:
+      - equal:
+          path: rules[0].resourceNames[0]
+          value: my-custom-name
+
   - it: should bind leaderelection Role to ServiceAccount
     template: rolebinding.yaml
     asserts:
