@@ -42,9 +42,9 @@ jobs:
           fi
 
       - name: Run golangci-lint
-        uses: golangci/golangci-lint-action@55c2c1448f86e01eaae002a5a3a9624417608d84  # v6
+        uses: golangci/golangci-lint-action@971e1a13acaf60b1b27712a1b63f27e9b4524cbb  # v7
         with:
-          version: v1.65.0
+          version: latest
           args: --timeout=5m
 
       - name: Lint Dockerfile
