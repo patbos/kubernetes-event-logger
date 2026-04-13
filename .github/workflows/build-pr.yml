@@ -40,6 +40,12 @@ jobs:
             exit 1
           fi
 
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@1e7e51e771db61008b38414a730f564565cf7c20  # v9.2.0
+        with:
+          version: latest
+          args: --timeout=5m
+
       - name: Run unit tests
         run: go test ./...
 
@@ -86,5 +92,5 @@ jobs:
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: `✅ **Build & Security Scan Complete**\n\n- Go formatting: OK\n- Unit tests: OK\n- Helm lint: OK\n- Trivy scan: OK\n\nSee [Security tab](https://github.com/${{ github.repository }}/security/code-scanning) for vulnerability details.`
+              body: `✅ **Build & Security Scan Complete**\n\n- Go formatting: OK\n- golangci-lint: OK\n- Unit tests: OK\n- Helm lint: OK\n- Trivy scan: OK\n\nSee [Security tab](https://github.com/${{ github.repository }}/security/code-scanning) for vulnerability details.`
             })
