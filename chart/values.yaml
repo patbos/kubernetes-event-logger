@@ -88,21 +88,10 @@ nodeSelector: {}
 
 tolerations: []
 
-# Pod anti-affinity: spread replicas across nodes for better availability
-# If node fails, only one replica is lost (not all)
-affinity:
-  podAntiAffinity:
-    # Soft rule: prefer different nodes, but allow same node if needed
-    preferredDuringSchedulingIgnoredDuringExecution:
-    - weight: 100
-      podAffinityTerm:
-        labelSelector:
-          matchExpressions:
-          - key: app.kubernetes.io/name
-            operator: In
-            values:
-            - kubernetes-event-logger
-        topologyKey: kubernetes.io/hostname
+# Pod anti-affinity: spread replicas across nodes for better availability.
+# Default uses the chart's selector labels so it works with nameOverride/fullnameOverride.
+# Set to {} to disable, or provide a custom affinity block.
+affinity: {}
 
 priorityClassName: ""
 

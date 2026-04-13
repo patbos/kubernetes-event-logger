@@ -47,7 +47,7 @@ spec:
           args:
             - -lease-duration={{ .Values.leaderElection.leaseDuration }}
             - -renew-deadline={{ .Values.leaderElection.renewDeadline }}
-            - -retry-period={{ .Values.retryPeriod | default .Values.leaderElection.retryPeriod }}
+            - -retry-period={{ .Values.leaderElection.retryPeriod }}
             {{- if .Values.enableDetailedMetrics }}
             - -enable-detailed-metrics
             {{- end }}
@@ -71,9 +71,19 @@ spec:
       nodeSelector:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- with .Values.affinity }}
+      {{- if .Values.affinity }}
       affinity:
-        {{- toYaml . | nindent 8 }}
+        {{- toYaml .Values.affinity | nindent 8 }}
+      {{- else }}
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    {{- include "kubernetes-event-logger.selectorLabels" . | nindent 20 }}
+                topologyKey: kubernetes.io/hostname
       {{- end }}
       {{- with .Values.tolerations }}
       tolerations:

@@ -175,6 +175,50 @@ tests:
                 fieldPath: metadata.namespace
 
   # Image
+  # Anti-affinity
+  - it: should render default pod anti-affinity with selector labels
+    asserts:
+      - equal:
+          path: spec.template.spec.affinity.podAntiAffinity.preferredDuringSchedulingIgnoredDuringExecution[0].weight
+          value: 100
+      - equal:
+          path: spec.template.spec.affinity.podAntiAffinity.preferredDuringSchedulingIgnoredDuringExecution[0].podAffinityTerm.topologyKey
+          value: kubernetes.io/hostname
+      - equal:
+          path: spec.template.spec.affinity.podAntiAffinity.preferredDuringSchedulingIgnoredDuringExecution[0].podAffinityTerm.labelSelector.matchLabels
+          value:
+            app.kubernetes.io/name: kubernetes-event-logger
+            app.kubernetes.io/instance: RELEASE-NAME
+
+  - it: should use nameOverride in default anti-affinity labels
+    set:
+      nameOverride: my-logger
+    asserts:
+      - equal:
+          path: spec.template.spec.affinity.podAntiAffinity.preferredDuringSchedulingIgnoredDuringExecution[0].podAffinityTerm.labelSelector.matchLabels
+          value:
+            app.kubernetes.io/name: my-logger
+            app.kubernetes.io/instance: RELEASE-NAME
+
+  - it: should use custom affinity when provided
+    set:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: disktype
+                    operator: In
+                    values:
+                      - ssd
+    asserts:
+      - equal:
+          path: spec.template.spec.affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution.nodeSelectorTerms[0].matchExpressions[0].key
+          value: disktype
+      - isNull:
+          path: spec.template.spec.affinity.podAntiAffinity
+
+  # Image
   - it: should render image with chart appVersion by default
     asserts:
       - matchRegex:
