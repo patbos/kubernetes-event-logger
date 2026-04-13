@@ -343,6 +343,24 @@ go test ./...
 
 Current automated tests cover event filter parsing and matching, health endpoint behavior, timestamp selection, and related helper logic in `filters_test.go` and `main_test.go`.
 
+### Lint
+
+```bash
+golangci-lint run ./...
+```
+
+Static analysis and security linting checks for:
+- Unchecked error returns
+- Unused variables and imports
+- Security anti-patterns (gosec)
+- Code simplifications and inefficiencies
+- Context and error handling issues
+
+The linter runs automatically in CI. Install locally with:
+```bash
+go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+```
+
 ### Helm Validation
 
 ```bash
