@@ -60,3 +60,9 @@ jobs:
 
       - name: Lint Helm chart
         run: helm lint chart
+
+      - name: Install helm-unittest plugin
+        run: helm plugin install https://github.com/helm-unittest/helm-unittest --verify=false
+
+      - name: Test Helm chart
+        run: helm unittest chart

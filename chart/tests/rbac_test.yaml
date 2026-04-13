@@ -1,0 +1,81 @@
+suite: RBAC
+tests:
+  - it: should grant get list watch on events
+    template: clusterrole.yaml
+    asserts:
+      - isKind:
+          of: ClusterRole
+      - equal:
+          path: rules[0].resources[0]
+          value: events
+      - equal:
+          path: rules[0].apiGroups[0]
+          value: ""
+      - contains:
+          path: rules[0].verbs
+          content: get
+      - contains:
+          path: rules[0].verbs
+          content: list
+      - contains:
+          path: rules[0].verbs
+          content: watch
+
+  - it: should bind ClusterRole to ServiceAccount
+    template: clusterrolebinding.yaml
+    asserts:
+      - isKind:
+          of: ClusterRoleBinding
+      - equal:
+          path: subjects[0].kind
+          value: ServiceAccount
+      - equal:
+          path: roleRef.kind
+          value: ClusterRole
+
+  - it: should create ServiceAccount by default
+    template: serviceaccount.yaml
+    asserts:
+      - isKind:
+          of: ServiceAccount
+      - hasDocuments:
+          count: 1
+
+  - it: should not create ServiceAccount when disabled
+    template: serviceaccount.yaml
+    set:
+      serviceAccount.create: false
+      serviceAccount.name: my-sa
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: should grant get update on leases for leader election
+    template: role.yaml
+    asserts:
+      - isKind:
+          of: Role
+      - equal:
+          path: rules[0].resources[0]
+          value: leases
+      - equal:
+          path: rules[0].apiGroups[0]
+          value: coordination.k8s.io
+      - contains:
+          path: rules[0].verbs
+          content: get
+      - contains:
+          path: rules[0].verbs
+          content: update
+
+  - it: should bind leaderelection Role to ServiceAccount
+    template: rolebinding.yaml
+    asserts:
+      - isKind:
+          of: RoleBinding
+      - equal:
+          path: subjects[0].kind
+          value: ServiceAccount
+      - equal:
+          path: roleRef.kind
+          value: Role

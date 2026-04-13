@@ -1,0 +1,46 @@
+suite: service monitor
+templates:
+  - servicemonitor.yaml
+tests:
+  - it: should not render by default
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: should render ServiceMonitor when enabled
+    set:
+      serviceMonitor.enabled: true
+    asserts:
+      - isKind:
+          of: ServiceMonitor
+      - hasDocuments:
+          count: 1
+
+  - it: should configure scrape interval and timeout
+    set:
+      serviceMonitor.enabled: true
+      serviceMonitor.interval: 60s
+      serviceMonitor.scrapeTimeout: 30s
+    asserts:
+      - equal:
+          path: spec.endpoints[0].interval
+          value: 60s
+      - equal:
+          path: spec.endpoints[0].scrapeTimeout
+          value: 30s
+
+  - it: should merge custom labels into metadata
+    set:
+      serviceMonitor.enabled: true
+      serviceMonitor.labels.release: prometheus
+    asserts:
+      - equal:
+          path: metadata.labels.release
+          value: prometheus
+
+  - it: should select pods by selector labels
+    set:
+      serviceMonitor.enabled: true
+    asserts:
+      - isNotNull:
+          path: spec.selector.matchLabels
