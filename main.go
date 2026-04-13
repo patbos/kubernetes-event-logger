@@ -358,7 +358,7 @@ func getK8sConfig(kubeconfig string) (*rest.Config, error) {
 	return config, nil
 }
 
-func handleHealth(w http.ResponseWriter, r *http.Request) {
+func handleHealth(w http.ResponseWriter, _ *http.Request) {
 	healthState.RLock()
 	isLeader := healthState.isLeader
 	cacheSynced := healthState.cacheSynced

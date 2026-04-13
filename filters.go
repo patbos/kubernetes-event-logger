@@ -1,3 +1,4 @@
+// Package main provides event filter parsing and matching for the Kubernetes event logger.
 package main
 
 import (

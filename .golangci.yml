@@ -1,14 +1,15 @@
+version: "2"
+
 run:
   timeout: 5m
-  go: "1.26"
 
 linters:
+  default: none
   enable:
     # Code quality
     - errcheck      # Unchecked error returns
-    - staticcheck   # Advanced static analysis
+    - staticcheck   # Advanced static analysis (includes gosimple and stylecheck)
     - unused        # Unused variables/imports
-    - gosimple      # Code simplifications
     - ineffassign   # Ineffective assignments
     - misspell      # Spelling mistakes in comments/strings
 
@@ -29,40 +30,32 @@ linters:
     # Logging
     - loggercheck   # Validate slog/log.Logger usage patterns
 
-  disable-all: false
-  fast: false
+  settings:
+    errcheck:
+      check-type-assertions: false
+      check-blank: false
 
-linters-settings:
-  errcheck:
-    # Report about not checking of errors in type assertions
-    check-type-assertions: false
-    # Report about assignment of errors to blank identifier
-    check-blank: false
+    gosec:
+      excludes:
+        - G204  # exec subprocess with dynamic args
+        - G306  # file mode is not specified
+      severity: medium
 
-  gosec:
-    # Exclude g204 (os/exec command injection) since we don't use exec
-    # Exclude g306 (file mode) as it's overly strict for this project
-    excludes:
-      - G204  # exec subprocess with dynamic args
-      - G306  # file mode is not specified
-    severity: medium
+    revive:
+      rules:
+        - name: package-comments
+          disabled: false
+        - name: receiver-naming
+          disabled: false
+        - name: var-naming
+          disabled: false
 
-  revive:
-    # Ignore package naming conventions for generated code
+  exclusions:
     rules:
-      - name: package-comments
-        disabled: false
-      - name: receiver-naming
-        disabled: false
-      - name: var-naming
-        disabled: false
+      - path: _test\.go
+        linters:
+          - gosec  # Security checks in tests are less critical
 
 issues:
-  # Show all issues
   max-issues-per-linter: 0
   max-same-issues: 0
-  # Don't report issues from test files unless they're critical
-  exclude-rules:
-    - path: _test\.go
-      linters:
-        - gosec  # Security checks in tests are less critical
