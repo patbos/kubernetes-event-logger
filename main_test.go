@@ -2001,3 +2001,24 @@ func TestNewAppMetricsPanicsOnDuplicateRegistry(t *testing.T) {
 	}()
 	newAppMetrics(reg)
 }
+
+func TestRunInvalidFlag(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	err := run(ctx, []string{"-no-such-flag"})
+	if err == nil {
+		t.Fatal("expected error for unknown flag, got nil")
+	}
+}
+
+func TestRunBadKubeconfig(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	err := run(ctx, []string{"-kubeconfig=/nonexistent/path/to/kubeconfig"})
+	if err == nil {
+		t.Fatal("expected error for non-existent kubeconfig, got nil")
+	}
+	if strings.Contains(err.Error(), "KUBERNETES_SERVICE_HOST") {
+		t.Errorf("error looks like an in-cluster fallback, want kubeconfig file error: %v", err)
+	}
+}
