@@ -40,6 +40,104 @@ type eventLogEntry struct {
 	Event *v1.Event `json:"event"`
 }
 
+type leaderStatusFunc func() (bool, time.Time)
+
+type eventProcessor struct {
+	leaderStatus    leaderStatusFunc
+	excludeFilters  eventFilters
+	logger          *log.Logger
+	detailedMetrics bool
+	metrics         eventProcessorMetrics
+	marshal         func(v any) ([]byte, error)
+	now             func() time.Time
+}
+
+type eventProcessorMetrics interface {
+	eventLogged(event *v1.Event, detailedMetrics bool)
+	eventFiltered(filterType string)
+	eventFailed(reason string)
+	observeProcessingDuration(duration time.Duration)
+}
+
+type prometheusEventProcessorMetrics struct{}
+
+func (prometheusEventProcessorMetrics) eventLogged(event *v1.Event, detailedMetrics bool) {
+	eventsTotal.WithLabelValues(event.Type).Inc()
+	if detailedMetrics {
+		eventsByNamespaceTotal.WithLabelValues(event.InvolvedObject.Namespace).Inc()
+		eventsByReasonTotal.WithLabelValues(event.Reason).Inc()
+		eventsByObjectKindTotal.WithLabelValues(event.InvolvedObject.Kind).Inc()
+	}
+	lastEventTimestamp.SetToCurrentTime()
+}
+
+func (prometheusEventProcessorMetrics) eventFiltered(filterType string) {
+	eventsFilteredTotal.WithLabelValues(filterType).Inc()
+}
+
+func (prometheusEventProcessorMetrics) eventFailed(reason string) {
+	eventsFailedTotal.WithLabelValues(reason).Inc()
+}
+
+func (prometheusEventProcessorMetrics) observeProcessingDuration(duration time.Duration) {
+	eventProcessingDuration.Observe(duration.Seconds())
+}
+
+func newEventProcessor(
+	leaderStatus leaderStatusFunc,
+	excludeFilters eventFilters,
+	logger *log.Logger,
+	detailedMetrics bool,
+	metrics eventProcessorMetrics,
+) *eventProcessor {
+	return &eventProcessor{
+		leaderStatus:    leaderStatus,
+		excludeFilters:  excludeFilters,
+		logger:          logger,
+		detailedMetrics: detailedMetrics,
+		metrics:         metrics,
+		marshal:         json.Marshal,
+		now:             time.Now,
+	}
+}
+
+func (p *eventProcessor) process(obj interface{}) {
+	isLeader, leaderStartTime := p.leaderStatus()
+	if !isLeader {
+		return
+	}
+
+	event, ok := obj.(*v1.Event)
+	if !ok {
+		return
+	}
+
+	start := p.now()
+	if isHistorical(event, leaderStartTime) {
+		p.metrics.eventFiltered("historical")
+		return
+	}
+	if p.excludeFilters.Match(event) {
+		p.metrics.eventFiltered("excluded_filter")
+		return
+	}
+
+	wrapper, err := p.marshal(eventLogEntry{
+		Time:  eventTime(event),
+		Level: eventLevel(event.Type),
+		Event: event,
+	})
+	if err != nil {
+		slog.Error("Failed to marshal event", "error", err)
+		p.metrics.eventFailed("marshal_error")
+		return
+	}
+
+	p.logger.Printf("%s\n", string(wrapper))
+	p.metrics.eventLogged(event, p.detailedMetrics)
+	p.metrics.observeProcessingDuration(p.now().Sub(start))
+}
+
 // Health state tracking
 var (
 	healthState = struct {
@@ -205,50 +303,13 @@ func main() {
 		}
 	}()
 
-	// Define event processor
-	logEvent := func(obj interface{}) {
-		healthState.RLock()
-		isLeader := healthState.isLeader
-		leaderStartTime := healthState.leaderStartTime
-		healthState.RUnlock()
-
-		if !isLeader {
-			return
-		}
-
-		start := time.Now()
-		event, ok := obj.(*v1.Event)
-		if !ok {
-			return
-		}
-		if isHistorical(event, leaderStartTime) {
-			eventsFilteredTotal.WithLabelValues("historical").Inc()
-			return
-		}
-		if excludeFilters.Match(event) {
-			eventsFilteredTotal.WithLabelValues("excluded_filter").Inc()
-			return
-		}
-		wrapper, err := json.Marshal(eventLogEntry{
-			Time:  eventTime(event),
-			Level: eventLevel(event.Type),
-			Event: event,
-		})
-		if err != nil {
-			slog.Error("Failed to marshal event", "error", err)
-			eventsFailedTotal.WithLabelValues("marshal_error").Inc()
-			return
-		}
-		loggerEvent.Printf("%s\n", string(wrapper))
-		eventsTotal.WithLabelValues(event.Type).Inc()
-		if *enableDetailedMetrics {
-			eventsByNamespaceTotal.WithLabelValues(event.InvolvedObject.Namespace).Inc()
-			eventsByReasonTotal.WithLabelValues(event.Reason).Inc()
-			eventsByObjectKindTotal.WithLabelValues(event.InvolvedObject.Kind).Inc()
-		}
-		lastEventTimestamp.SetToCurrentTime()
-		eventProcessingDuration.Observe(time.Since(start).Seconds())
-	}
+	eventProcessor := newEventProcessor(
+		currentLeaderStatus,
+		excludeFilters,
+		loggerEvent,
+		*enableDetailedMetrics,
+		prometheusEventProcessorMetrics{},
+	)
 
 	// Sync cache for all pods (leader and standby) before leader election
 	factory := informers.NewSharedInformerFactory(clientset, 0)
@@ -256,9 +317,9 @@ func main() {
 
 	eventInformer := factory.Core().V1().Events().Informer()
 	_, err = eventInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc: logEvent,
+		AddFunc: eventProcessor.process,
 		UpdateFunc: func(_, newObj interface{}) {
-			logEvent(newObj)
+			eventProcessor.process(newObj)
 		},
 	})
 	if err != nil {
@@ -341,6 +402,12 @@ func eventLevel(eventType string) string {
 		return "info"
 	}
 	return "debug"
+}
+
+func currentLeaderStatus() (bool, time.Time) {
+	healthState.RLock()
+	defer healthState.RUnlock()
+	return healthState.isLeader, healthState.leaderStartTime
 }
 
 func isHistorical(event *v1.Event, startTime time.Time) bool {
