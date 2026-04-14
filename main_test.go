@@ -144,33 +144,30 @@ func TestEventTime(t *testing.T) {
 
 func TestEventLevel(t *testing.T) {
 	testCases := []struct {
+		name      string
 		eventType string
 		expected  string
 	}{
-		{
-			eventType: "Warning",
-			expected:  "warn",
-		},
-		{
-			eventType: "Normal",
-			expected:  "info",
-		},
-		{
-			eventType: "Unknown",
-			expected:  "debug",
-		},
-		{
-			eventType: "",
-			expected:  "debug",
-		},
-		{
-			eventType: "Custom",
-			expected:  "debug",
-		},
+		{name: "Warning", eventType: "Warning", expected: "warn"},
+		{name: "Normal", eventType: "Normal", expected: "info"},
+		{name: "Unknown", eventType: "Unknown", expected: "debug"},
+		{name: "empty string", eventType: "", expected: "debug"},
+		{name: "Custom", eventType: "Custom", expected: "debug"},
+		{name: "warning (lowercase)", eventType: "warning", expected: "warn"},
+		{name: "WARNING (uppercase)", eventType: "WARNING", expected: "warn"},
+		{name: "normal (lowercase)", eventType: "normal", expected: "info"},
+		{name: "NORMAL (uppercase)", eventType: "NORMAL", expected: "info"},
+		{name: "Error", eventType: "Error", expected: "debug"},
+		{name: "Critical", eventType: "Critical", expected: "debug"},
+		{name: "Info", eventType: "Info", expected: "debug"},
+		{name: "Notice", eventType: "Notice", expected: "debug"},
+		{name: "Debug", eventType: "Debug", expected: "debug"},
+		{name: "Trace", eventType: "Trace", expected: "debug"},
+		{name: "random-string", eventType: "random-string", expected: "debug"},
 	}
 
 	for _, tc := range testCases {
-		t.Run(tc.eventType, func(t *testing.T) {
+		t.Run(tc.name, func(t *testing.T) {
 			got := eventLevel(tc.eventType)
 			if got != tc.expected {
 				t.Fatalf("eventLevel(%q) = %q, want %q", tc.eventType, got, tc.expected)
@@ -191,26 +188,20 @@ func TestIsHistorical(t *testing.T) {
 		expected  bool
 	}{
 		{
-			name: "event before startTime is historical",
-			event: &v1.Event{
-				EventTime: metav1.MicroTime{Time: past},
-			},
+			name:      "event before startTime is historical",
+			event:     &v1.Event{EventTime: metav1.MicroTime{Time: past}},
 			startTime: now,
 			expected:  true,
 		},
 		{
-			name: "event after startTime is not historical",
-			event: &v1.Event{
-				EventTime: metav1.MicroTime{Time: future},
-			},
+			name:      "event after startTime is not historical",
+			event:     &v1.Event{EventTime: metav1.MicroTime{Time: future}},
 			startTime: now,
 			expected:  false,
 		},
 		{
-			name: "event at exact startTime is historical",
-			event: &v1.Event{
-				EventTime: metav1.MicroTime{Time: now},
-			},
+			name:      "event at exact startTime is historical",
+			event:     &v1.Event{EventTime: metav1.MicroTime{Time: now}},
 			startTime: now,
 			expected:  true,
 		},
@@ -232,6 +223,43 @@ func TestIsHistorical(t *testing.T) {
 			},
 			startTime: now,
 			expected:  false,
+		},
+		{
+			name:      "nanosecond before startTime is historical",
+			event:     &v1.Event{EventTime: metav1.MicroTime{Time: now.Add(-1 * time.Nanosecond)}},
+			startTime: now,
+			expected:  true,
+		},
+		{
+			name:      "microsecond before startTime is historical",
+			event:     &v1.Event{EventTime: metav1.MicroTime{Time: now.Add(-1 * time.Microsecond)}},
+			startTime: now,
+			expected:  true,
+		},
+		{
+			name:      "millisecond after startTime is not historical",
+			event:     &v1.Event{EventTime: metav1.MicroTime{Time: now.Add(1 * time.Millisecond)}},
+			startTime: now,
+			expected:  false,
+		},
+		{
+			name: "historical by EventTime even when other timestamps are future",
+			event: &v1.Event{
+				EventTime:      metav1.MicroTime{Time: now.Add(-1 * time.Hour)},
+				LastTimestamp:  metav1.Time{Time: now.Add(1 * time.Hour)},
+				FirstTimestamp: metav1.Time{Time: now.Add(2 * time.Hour)},
+			},
+			startTime: now,
+			expected:  true,
+		},
+		{
+			name: "historical by LastTimestamp when EventTime is zero",
+			event: &v1.Event{
+				LastTimestamp:  metav1.Time{Time: now.Add(-30 * time.Minute)},
+				FirstTimestamp: metav1.Time{Time: now.Add(1 * time.Hour)},
+			},
+			startTime: now,
+			expected:  true,
 		},
 	}
 
@@ -620,107 +648,117 @@ func TestCurrentLeaderStatusReadsHealthState(t *testing.T) {
 	}
 }
 
-func TestHandleHealthLeader(t *testing.T) {
-	tracker := &healthTracker{
-		isLeader:    true,
-		cacheSynced: true,
-		startTime:   time.Now().Add(-10 * time.Second),
+func TestHandleHealth(t *testing.T) {
+	testCases := []struct {
+		name             string
+		isLeader         bool
+		cacheSynced      bool
+		expectedCode     int
+		expectedFields   []string
+		checkContentType bool
+		checkJSON        bool
+	}{
+		{
+			name:         "leader with synced cache is healthy",
+			isLeader:     true,
+			cacheSynced:  true,
+			expectedCode: http.StatusOK,
+			expectedFields: []string{
+				`"status":"healthy"`,
+				`"leader":true`,
+				`"cache_synced":true`,
+				`"version"`,
+				`"dev"`,
+				`"uptime_seconds"`,
+			},
+			checkContentType: true,
+			checkJSON:        true,
+		},
+		{
+			name:         "non-leader with synced cache is healthy",
+			isLeader:     false,
+			cacheSynced:  true,
+			expectedCode: http.StatusOK,
+			expectedFields: []string{
+				`"status":"healthy"`,
+				`"leader":false`,
+				`"cache_synced":true`,
+			},
+		},
+		{
+			name:         "leader without synced cache is not ready",
+			isLeader:     true,
+			cacheSynced:  false,
+			expectedCode: http.StatusServiceUnavailable,
+			expectedFields: []string{
+				`"status":"not-ready"`,
+				`"cache_synced":false`,
+				`"leader":true`,
+			},
+		},
+		{
+			name:         "non-leader without synced cache is not ready",
+			isLeader:     false,
+			cacheSynced:  false,
+			expectedCode: http.StatusServiceUnavailable,
+			expectedFields: []string{
+				`"status":"not-ready"`,
+				`"cache_synced":false`,
+				`"leader":false`,
+			},
+		},
 	}
 
-	req := httptest.NewRequestWithContext(context.Background(), "GET", "/healthz", nil)
-	w := httptest.NewRecorder()
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			tracker := &healthTracker{
+				isLeader:    tc.isLeader,
+				cacheSynced: tc.cacheSynced,
+				startTime:   time.Now().Add(-5 * time.Second),
+			}
+			req := httptest.NewRequestWithContext(context.Background(), "GET", "/healthz", nil)
+			w := httptest.NewRecorder()
+			tracker.handleHealth(w, req)
 
-	tracker.handleHealth(w, req)
-
-	// Check status code
-	if w.Code != http.StatusOK {
-		t.Fatalf("handleHealth status code = %d, want %d", w.Code, http.StatusOK)
-	}
-
-	// Check response contains expected fields
-	resp := w.Body.String()
-	if resp == "" {
-		t.Fatal("handleHealth returned empty response")
-	}
-
-	// Verify key fields are in response
-	expectedFields := []string{
-		`"status":"healthy"`,
-		`"leader":true`,
-		`"cache_synced":true`,
-		`"version":"dev"`,
-	}
-
-	for _, field := range expectedFields {
-		if !contains(resp, field) {
-			t.Errorf("handleHealth response missing field: %s", field)
-		}
-	}
-}
-
-func TestHandleHealthNonLeader(t *testing.T) {
-	tracker := &healthTracker{
-		isLeader:    false,
-		cacheSynced: true,
-		startTime:   time.Now().Add(-5 * time.Second),
-	}
-
-	req := httptest.NewRequestWithContext(context.Background(), "GET", "/healthz", nil)
-	w := httptest.NewRecorder()
-
-	tracker.handleHealth(w, req)
-
-	// Non-leader with synced cache should be healthy
-	if w.Code != http.StatusOK {
-		t.Fatalf("handleHealth status code = %d, want %d", w.Code, http.StatusOK)
-	}
-
-	resp := w.Body.String()
-	if !contains(resp, `"leader":false`) {
-		t.Error("handleHealth response missing leader=false")
-	}
-	if !contains(resp, `"status":"healthy"`) {
-		t.Error("handleHealth response should show healthy for non-leader with synced cache")
-	}
-}
-
-func TestHandleHealthNotReady(t *testing.T) {
-	tracker := &healthTracker{
-		isLeader:    false,
-		cacheSynced: false,
-		startTime:   time.Now(),
-	}
-
-	req := httptest.NewRequestWithContext(context.Background(), "GET", "/healthz", nil)
-	w := httptest.NewRecorder()
-
-	tracker.handleHealth(w, req)
-
-	// Cache not synced should return ServiceUnavailable
-	if w.Code != http.StatusServiceUnavailable {
-		t.Fatalf("handleHealth status code = %d, want %d", w.Code, http.StatusServiceUnavailable)
-	}
-
-	resp := w.Body.String()
-	if !contains(resp, `"status":"not-ready"`) {
-		t.Error("handleHealth response should show not-ready when cache not synced")
-	}
-	if !contains(resp, `"cache_synced":false`) {
-		t.Error("handleHealth response missing cache_synced=false")
-	}
-}
-
-func TestHandleHealthContentType(t *testing.T) {
-	tracker := &healthTracker{cacheSynced: true}
-
-	req := httptest.NewRequestWithContext(context.Background(), "GET", "/healthz", nil)
-	w := httptest.NewRecorder()
-
-	tracker.handleHealth(w, req)
-
-	contentType := w.Header().Get("Content-Type")
-	if contentType != "application/json" {
-		t.Fatalf("handleHealth Content-Type = %q, want application/json", contentType)
+			if w.Code != tc.expectedCode {
+				t.Fatalf("status = %d, want %d", w.Code, tc.expectedCode)
+			}
+			resp := w.Body.String()
+			for _, field := range tc.expectedFields {
+				if !contains(resp, field) {
+					t.Errorf("response missing field: %s", field)
+				}
+			}
+			if tc.checkContentType {
+				ct := w.Header().Get("Content-Type")
+				if ct != "application/json" {
+					t.Errorf("Content-Type = %q, want application/json", ct)
+				}
+			}
+			if tc.checkJSON {
+				var parsed map[string]interface{}
+				if err := json.Unmarshal(w.Body.Bytes(), &parsed); err != nil {
+					t.Fatalf("response is not valid JSON: %v", err)
+				}
+				for _, key := range []string{"status", "leader", "cache_synced", "uptime_seconds", "version"} {
+					if _, ok := parsed[key]; !ok {
+						t.Errorf("JSON response missing field: %s", key)
+					}
+				}
+				if _, ok := parsed["status"].(string); !ok {
+					t.Error("status should be string")
+				}
+				if _, ok := parsed["leader"].(bool); !ok {
+					t.Error("leader should be boolean")
+				}
+				if _, ok := parsed["cache_synced"].(bool); !ok {
+					t.Error("cache_synced should be boolean")
+				}
+				if _, ok := parsed["uptime_seconds"].(float64); !ok {
+					t.Error("uptime_seconds should be number")
+				}
+			}
+		})
 	}
 }
 
@@ -767,113 +805,6 @@ func TestEventReportingComponent(t *testing.T) {
 			got := eventReportingComponent(tc.event)
 			if got != tc.expected {
 				t.Fatalf("eventReportingComponent() = %q, want %q", got, tc.expected)
-			}
-		})
-	}
-}
-
-func TestHandleHealthUptime(t *testing.T) {
-	tracker := &healthTracker{
-		cacheSynced: true,
-		startTime:   time.Now().Add(-100 * time.Second),
-	}
-
-	req := httptest.NewRequestWithContext(context.Background(), "GET", "/healthz", nil)
-	w := httptest.NewRecorder()
-
-	tracker.handleHealth(w, req)
-
-	resp := w.Body.String()
-	// Should have uptime_seconds field with value ~100
-	if !contains(resp, `"uptime_seconds"`) {
-		t.Error("handleHealth response missing uptime_seconds field")
-	}
-}
-
-func TestHandleHealthUptimeZero(t *testing.T) {
-	tracker := &healthTracker{
-		cacheSynced: true,
-		startTime:   time.Now(),
-	}
-
-	req := httptest.NewRequestWithContext(context.Background(), "GET", "/healthz", nil)
-	w := httptest.NewRecorder()
-
-	tracker.handleHealth(w, req)
-
-	resp := w.Body.String()
-	// Just check that uptime_seconds is present.
-	// Since it's a float, we just verify it starts with 0.
-	if !contains(resp, `"uptime_seconds":0`) && !contains(resp, `"uptime_seconds":-0`) {
-		// If it's scientific notation like 1.23e-05, it might not contain :0
-		// But for now let's just accept any small value by checking if it's there
-		if !contains(resp, `"uptime_seconds"`) {
-			t.Error("handleHealth response missing uptime_seconds field")
-		}
-	}
-}
-
-func TestEventLevelUnknownTypes(t *testing.T) {
-	// Ensure all unknown types return "debug"
-	unknownTypes := []string{
-		"Error",
-		"Critical",
-		"Info",
-		"Notice",
-		"Debug",
-		"Trace",
-		"",
-		"random-string",
-	}
-
-	for _, eventType := range unknownTypes {
-		level := eventLevel(eventType)
-		if level != "debug" {
-			t.Errorf("eventLevel(%q) = %q, want debug", eventType, level)
-		}
-	}
-}
-
-func TestIsHistoricalEdgeCases(t *testing.T) {
-	now := time.Now().UTC()
-
-	testCases := []struct {
-		name      string
-		event     *v1.Event
-		startTime time.Time
-		expected  bool
-	}{
-		{
-			name: "nanosecond difference counts as historical",
-			event: &v1.Event{
-				EventTime: metav1.MicroTime{Time: now.Add(-1 * time.Nanosecond)},
-			},
-			startTime: now,
-			expected:  true,
-		},
-		{
-			name: "far future event is not historical",
-			event: &v1.Event{
-				EventTime: metav1.MicroTime{Time: now.Add(1 * time.Hour)},
-			},
-			startTime: now,
-			expected:  false,
-		},
-		{
-			name: "far past event is historical",
-			event: &v1.Event{
-				EventTime: metav1.MicroTime{Time: now.Add(-24 * time.Hour)},
-			},
-			startTime: now,
-			expected:  true,
-		},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			got := isHistorical(tc.event, tc.startTime)
-			if got != tc.expected {
-				t.Fatalf("isHistorical() = %v, want %v", got, tc.expected)
 			}
 		})
 	}
@@ -965,134 +896,6 @@ func TestEventTimePriority(t *testing.T) {
 			got := eventTime(tc.event)
 			if !got.Equal(tc.expected) {
 				t.Fatalf("eventTime() = %v, want %v", got, tc.expected)
-			}
-		})
-	}
-}
-
-func TestIsHistoricalBoundary(t *testing.T) {
-	now := time.Now().UTC()
-
-	testCases := []struct {
-		name      string
-		eventTime time.Time
-		startTime time.Time
-		expected  bool
-	}{
-		{
-			name:      "microsecond before startTime is historical",
-			eventTime: now.Add(-1 * time.Microsecond),
-			startTime: now,
-			expected:  true,
-		},
-		{
-			name:      "millisecond after startTime is not historical",
-			eventTime: now.Add(1 * time.Millisecond),
-			startTime: now,
-			expected:  false,
-		},
-		{
-			name:      "exactly at startTime is historical (not after)",
-			eventTime: now,
-			startTime: now,
-			expected:  true,
-		},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			event := &v1.Event{
-				EventTime: metav1.MicroTime{Time: tc.eventTime},
-			}
-			got := isHistorical(event, tc.startTime)
-			if got != tc.expected {
-				t.Fatalf("isHistorical() = %v, want %v", got, tc.expected)
-			}
-		})
-	}
-}
-
-func TestEventLevelMapping(t *testing.T) {
-	testCases := []struct {
-		eventType string
-		expected  string
-	}{
-		{"Warning", "warn"},
-		{"Normal", "info"},
-		{"Error", "debug"},
-		{"Critical", "debug"},
-		{"Info", "debug"},
-		{"", "debug"},
-		{"UNKNOWN", "debug"},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.eventType, func(t *testing.T) {
-			got := eventLevel(tc.eventType)
-			if got != tc.expected {
-				t.Errorf("eventLevel(%q) = %q, want %q", tc.eventType, got, tc.expected)
-			}
-		})
-	}
-}
-
-func TestHandleHealthResponseStructure(t *testing.T) {
-	tracker := &healthTracker{
-		isLeader:    true,
-		cacheSynced: true,
-		startTime:   time.Now().Add(-5 * time.Second),
-	}
-
-	req := httptest.NewRequestWithContext(context.Background(), "GET", "/healthz", nil)
-	w := httptest.NewRecorder()
-
-	tracker.handleHealth(w, req)
-
-	requiredFields := []string{
-		`"status"`,
-		`"leader"`,
-		`"cache_synced"`,
-		`"uptime_seconds"`,
-		`"version"`,
-	}
-
-	resp := w.Body.String()
-	for _, field := range requiredFields {
-		if !contains(resp, field) {
-			t.Errorf("handleHealth response missing required field: %s", field)
-		}
-	}
-}
-
-func TestHandleHealthStatusCodeNotReady(t *testing.T) {
-	testCases := []struct {
-		name        string
-		cacheSynced bool
-		expected    int
-	}{
-		{
-			name:        "healthy when synced",
-			cacheSynced: true,
-			expected:    http.StatusOK,
-		},
-		{
-			name:        "not ready when not synced",
-			cacheSynced: false,
-			expected:    http.StatusServiceUnavailable,
-		},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			tracker := &healthTracker{cacheSynced: tc.cacheSynced}
-
-			req := httptest.NewRequestWithContext(context.Background(), "GET", "/healthz", nil)
-			w := httptest.NewRecorder()
-
-			tracker.handleHealth(w, req)
-
-			if w.Code != tc.expected {
-				t.Fatalf("handleHealth status = %d, want %d", w.Code, tc.expected)
 			}
 		})
 	}
@@ -1201,82 +1004,6 @@ func TestEventTimeZeroHandling(t *testing.T) {
 				t.Fatalf("eventTime().IsZero() = %v, want %v", isZero, tc.expected)
 			}
 		})
-	}
-}
-
-func TestHandleHealthLeadershipStates(t *testing.T) {
-	testCases := []struct {
-		name        string
-		isLeader    bool
-		cacheSynced bool
-		expectedSts int
-	}{
-		{
-			name:        "leader with synced cache is healthy",
-			isLeader:    true,
-			cacheSynced: true,
-			expectedSts: http.StatusOK,
-		},
-		{
-			name:        "non-leader with synced cache is healthy",
-			isLeader:    false,
-			cacheSynced: true,
-			expectedSts: http.StatusOK,
-		},
-		{
-			name:        "leader without synced cache is not ready",
-			isLeader:    true,
-			cacheSynced: false,
-			expectedSts: http.StatusServiceUnavailable,
-		},
-		{
-			name:        "non-leader without synced cache is not ready",
-			isLeader:    false,
-			cacheSynced: false,
-			expectedSts: http.StatusServiceUnavailable,
-		},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			tracker := &healthTracker{
-				isLeader:    tc.isLeader,
-				cacheSynced: tc.cacheSynced,
-			}
-
-			req := httptest.NewRequestWithContext(context.Background(), "GET", "/healthz", nil)
-			w := httptest.NewRecorder()
-			tracker.handleHealth(w, req)
-
-			if w.Code != tc.expectedSts {
-				t.Fatalf("handleHealth status = %d, want %d", w.Code, tc.expectedSts)
-			}
-
-			// Verify response content matches state
-			resp := w.Body.String()
-			if tc.isLeader && !contains(resp, `"leader":true`) {
-				t.Error("response should indicate leader=true")
-			}
-			if !tc.isLeader && !contains(resp, `"leader":false`) {
-				t.Error("response should indicate leader=false")
-			}
-		})
-	}
-}
-
-func TestHandleHealthVersionReported(t *testing.T) {
-	tracker := &healthTracker{cacheSynced: true}
-
-	req := httptest.NewRequestWithContext(context.Background(), "GET", "/healthz", nil)
-	w := httptest.NewRecorder()
-	tracker.handleHealth(w, req)
-
-	resp := w.Body.String()
-	if !contains(resp, `"version"`) {
-		t.Error("handleHealth response missing version field")
-	}
-	if !contains(resp, `"dev"`) {
-		t.Error("handleHealth should report version 'dev' in test environment")
 	}
 }
 
@@ -1563,138 +1290,6 @@ func TestEventTimestampVariations(t *testing.T) {
 	}
 }
 
-func TestHandleHealthHTTPMethods(t *testing.T) {
-	tracker := &healthTracker{cacheSynced: true}
-
-	// Health endpoint should handle GET requests
-	req := httptest.NewRequestWithContext(context.Background(), "GET", "/healthz", nil)
-	w := httptest.NewRecorder()
-	tracker.handleHealth(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Errorf("GET /healthz returned %d, want %d", w.Code, http.StatusOK)
-	}
-}
-
-func TestHandleHealthMultipleCalls(t *testing.T) {
-	tracker := &healthTracker{
-		cacheSynced: true,
-		isLeader:    true,
-		startTime:   time.Now(),
-	}
-
-	for i := 0; i < 5; i++ {
-		req := httptest.NewRequestWithContext(context.Background(), "GET", "/healthz", nil)
-		w := httptest.NewRecorder()
-		tracker.handleHealth(w, req)
-
-		if w.Code != http.StatusOK {
-			t.Errorf("call %d: expected status OK, got %d", i+1, w.Code)
-		}
-
-		resp := w.Body.String()
-		if !contains(resp, `"status":"healthy"`) {
-			t.Errorf("call %d: expected healthy status", i+1)
-		}
-	}
-}
-
-func TestIsHistoricalWithDifferentTimestampFields(t *testing.T) {
-	baseTime := time.Now().UTC()
-
-	testCases := []struct {
-		name      string
-		event     *v1.Event
-		startTime time.Time
-		expected  bool
-	}{
-		{
-			name: "historical determined by EventTime",
-			event: &v1.Event{
-				EventTime:      metav1.MicroTime{Time: baseTime.Add(-1 * time.Hour)},
-				LastTimestamp:  metav1.Time{Time: baseTime.Add(1 * time.Hour)},
-				FirstTimestamp: metav1.Time{Time: baseTime.Add(2 * time.Hour)},
-			},
-			startTime: baseTime,
-			expected:  true,
-		},
-		{
-			name: "historical determined by LastTimestamp when EventTime zero",
-			event: &v1.Event{
-				LastTimestamp:  metav1.Time{Time: baseTime.Add(-30 * time.Minute)},
-				FirstTimestamp: metav1.Time{Time: baseTime.Add(1 * time.Hour)},
-			},
-			startTime: baseTime,
-			expected:  true,
-		},
-		{
-			name: "historical determined by FirstTimestamp when others zero",
-			event: &v1.Event{
-				FirstTimestamp: metav1.Time{Time: baseTime.Add(-15 * time.Minute)},
-			},
-			startTime: baseTime,
-			expected:  true,
-		},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			got := isHistorical(tc.event, tc.startTime)
-			if got != tc.expected {
-				t.Fatalf("isHistorical() = %v, want %v", got, tc.expected)
-			}
-		})
-	}
-}
-
-func TestEventLevelCaseSensitivity(t *testing.T) {
-	testCases := []struct {
-		input    string
-		expected string
-	}{
-		{"Warning", "warn"},
-		{"warning", "warn"},
-		{"WARNING", "warn"},
-		{"Normal", "info"},
-		{"normal", "info"},
-		{"NORMAL", "info"},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.input, func(t *testing.T) {
-			got := eventLevel(tc.input)
-			if got != tc.expected {
-				t.Fatalf("eventLevel(%q) = %q, want %q", tc.input, got, tc.expected)
-			}
-		})
-	}
-}
-
-func TestHandleHealthConsistency(t *testing.T) {
-	tracker := &healthTracker{
-		isLeader:    true,
-		cacheSynced: true,
-		startTime:   time.Now().Add(-10 * time.Second),
-	}
-
-	// Make multiple requests and verify consistency
-	responses := make([]string, 3)
-	for i := 0; i < 3; i++ {
-		req := httptest.NewRequestWithContext(context.Background(), "GET", "/healthz", nil)
-		w := httptest.NewRecorder()
-		tracker.handleHealth(w, req)
-		responses[i] = w.Body.String()
-
-		// All should contain the same status
-		if !contains(responses[i], `"status":"healthy"`) {
-			t.Fatalf("response %d missing healthy status", i+1)
-		}
-		if !contains(responses[i], `"leader":true`) {
-			t.Fatalf("response %d missing leader=true", i+1)
-		}
-	}
-}
-
 func TestEventFilterMatchingWithEmptyEvent(t *testing.T) {
 	emptyEvent := &v1.Event{}
 
@@ -1946,63 +1541,6 @@ func TestParseEventFilterReportingComponentVariants(t *testing.T) {
 	}
 }
 
-func TestHandleHealthJSONValid(t *testing.T) {
-	tracker := &healthTracker{
-		cacheSynced: true,
-		isLeader:    true,
-		startTime:   time.Now().Add(-5 * time.Second),
-	}
-
-	req := httptest.NewRequestWithContext(context.Background(), "GET", "/healthz", nil)
-	w := httptest.NewRecorder()
-	tracker.handleHealth(w, req)
-
-	resp := w.Body.String()
-	if !contains(resp, "{") || !contains(resp, "}") {
-		t.Fatal("handleHealth response is not valid JSON")
-	}
-	if !contains(resp, ":") {
-		t.Fatal("handleHealth response missing JSON key-value pairs")
-	}
-}
-
-func TestIsHistoricalUTC(t *testing.T) {
-	now := time.Now().UTC()
-	past := now.Add(-1 * time.Hour)
-
-	event := &v1.Event{
-		EventTime: metav1.MicroTime{Time: past},
-	}
-
-	if !isHistorical(event, now) {
-		t.Fatal("past event should be historical")
-	}
-}
-
-func TestEventTimeConsistency(t *testing.T) {
-	now := time.Now().UTC()
-
-	event := &v1.Event{
-		EventTime: metav1.MicroTime{Time: now},
-	}
-
-	time1 := eventTime(event)
-	time2 := eventTime(event)
-
-	if !time1.Equal(time2) {
-		t.Fatalf("eventTime() not consistent: %v != %v", time1, time2)
-	}
-}
-
-func TestEventLevelConsistency(t *testing.T) {
-	level1 := eventLevel("Warning")
-	level2 := eventLevel("Warning")
-
-	if level1 != level2 {
-		t.Fatalf("eventLevel() not consistent: %q != %q", level1, level2)
-	}
-}
-
 func TestEventFilterComplexScenarios(t *testing.T) {
 	event := &v1.Event{
 		InvolvedObject: v1.ObjectReference{
@@ -2207,111 +1745,6 @@ func TestEventFilteringLogic(t *testing.T) {
 				t.Fatalf("Match() = %v, want %v (shouldLog=%v)", filtered, shouldFilter, tc.shouldLog)
 			}
 		})
-	}
-}
-
-func TestHistoricalEventFiltering(t *testing.T) {
-	baseTime := time.Now().UTC()
-
-	testCases := []struct {
-		name       string
-		event      *v1.Event
-		startTime  time.Time
-		isHistoric bool
-	}{
-		{
-			name: "old event is historical",
-			event: &v1.Event{
-				EventTime: metav1.MicroTime{Time: baseTime.Add(-1 * time.Hour)},
-			},
-			startTime:  baseTime,
-			isHistoric: true,
-		},
-		{
-			name: "new event is not historical",
-			event: &v1.Event{
-				EventTime: metav1.MicroTime{Time: baseTime.Add(1 * time.Minute)},
-			},
-			startTime:  baseTime,
-			isHistoric: false,
-		},
-		{
-			name: "event at startup is historical",
-			event: &v1.Event{
-				EventTime: metav1.MicroTime{Time: baseTime},
-			},
-			startTime:  baseTime,
-			isHistoric: true,
-		},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			result := isHistorical(tc.event, tc.startTime)
-			if result != tc.isHistoric {
-				t.Fatalf("isHistorical() = %v, want %v", result, tc.isHistoric)
-			}
-		})
-	}
-}
-
-func TestEventLevelOutputMapping(t *testing.T) {
-	testCases := []struct {
-		eventType string
-		level     string
-	}{
-		{"Warning", "warn"},
-		{"Normal", "info"},
-		{"Unknown", "debug"},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.eventType, func(t *testing.T) {
-			level := eventLevel(tc.eventType)
-			if level != tc.level {
-				t.Fatalf("eventLevel(%q) = %q, want %q", tc.eventType, level, tc.level)
-			}
-		})
-	}
-}
-
-func TestHealthEndpointJSONStructure(t *testing.T) {
-	tracker := &healthTracker{
-		cacheSynced: true,
-		isLeader:    true,
-		startTime:   time.Now().Add(-10 * time.Second),
-	}
-
-	req := httptest.NewRequestWithContext(context.Background(), "GET", "/healthz", nil)
-	w := httptest.NewRecorder()
-	tracker.handleHealth(w, req)
-
-	var response map[string]interface{}
-	err := json.Unmarshal(w.Body.Bytes(), &response)
-	if err != nil {
-		t.Fatalf("failed to unmarshal health response: %v", err)
-	}
-
-	// Verify all required fields exist
-	requiredFields := []string{"status", "leader", "cache_synced", "uptime_seconds", "version"}
-	for _, field := range requiredFields {
-		if _, ok := response[field]; !ok {
-			t.Errorf("missing field: %s", field)
-		}
-	}
-
-	// Verify field types
-	if _, ok := response["status"].(string); !ok {
-		t.Error("status should be string")
-	}
-	if _, ok := response["leader"].(bool); !ok {
-		t.Error("leader should be boolean")
-	}
-	if _, ok := response["cache_synced"].(bool); !ok {
-		t.Error("cache_synced should be boolean")
-	}
-	if _, ok := response["uptime_seconds"].(float64); !ok {
-		t.Error("uptime_seconds should be number")
 	}
 }
 
