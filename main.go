@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"flag"
+	"fmt"
 	"log"
 	"log/slog"
 	"net/http"
@@ -288,7 +289,16 @@ func (p *eventProcessor) process(obj interface{}) {
 func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
+	if err := run(ctx, os.Args[1:]); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			os.Exit(0)
+		}
+		slog.Error("fatal error", "error", err)
+		os.Exit(1)
+	}
+}
 
+func run(ctx context.Context, args []string) error {
 	var kubeconfigDefault string
 	if home, err := os.UserHomeDir(); err == nil && home != "" {
 		if p := filepath.Join(home, ".kube", "config"); fileExists(p) {
@@ -296,15 +306,18 @@ func main() {
 		}
 	}
 
-	kubeconfig := flag.String("kubeconfig", kubeconfigDefault, "(optional) absolute path to the kubeconfig file")
-	leaseDuration := flag.Duration("lease-duration", 15*time.Second, "duration a leader lease is valid before another candidate can take over")
-	renewDeadline := flag.Duration("renew-deadline", 10*time.Second, "duration the leader has to renew the lease before losing it")
-	retryPeriod := flag.Duration("retry-period", 2*time.Second, "how often candidates retry acquiring or renewing the lease")
-	leaseName := flag.String("lease-name", "kubernetes-event-logger", "name of the leader election Lease resource")
-	enableDetailedMetrics := flag.Bool("enable-detailed-metrics", false, "enable high-cardinality metrics (events by namespace, reason, and object kind)")
+	fs := flag.NewFlagSet("kubernetes-event-logger", flag.ContinueOnError)
+	kubeconfig := fs.String("kubeconfig", kubeconfigDefault, "(optional) absolute path to the kubeconfig file")
+	leaseDuration := fs.Duration("lease-duration", 15*time.Second, "duration a leader lease is valid before another candidate can take over")
+	renewDeadline := fs.Duration("renew-deadline", 10*time.Second, "duration the leader has to renew the lease before losing it")
+	retryPeriod := fs.Duration("retry-period", 2*time.Second, "how often candidates retry acquiring or renewing the lease")
+	leaseName := fs.String("lease-name", "kubernetes-event-logger", "name of the leader election Lease resource")
+	enableDetailedMetrics := fs.Bool("enable-detailed-metrics", false, "enable high-cardinality metrics (events by namespace, reason, and object kind)")
 	var excludeFilters eventFilters
-	flag.Var(&excludeFilters, "exclude-filter", "exclude events matching all clauses in a rule; repeatable, format: field=value[,field=value] with fields namespace,kind,name,reason,type,reporting-component,reporting-controller,source-component")
-	flag.Parse()
+	fs.Var(&excludeFilters, "exclude-filter", "exclude events matching all clauses in a rule; repeatable, format: field=value[,field=value] with fields namespace,kind,name,reason,type,reporting-component,reporting-controller,source-component")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
 
 	loggerEvent := log.New(os.Stdout, "", 0)
 
@@ -315,20 +328,17 @@ func main() {
 
 	config, err := getK8sConfig(*kubeconfig)
 	if err != nil {
-		slog.Error("Failed to load kubernetes configuration", "error", err)
-		os.Exit(1)
+		return fmt.Errorf("failed to load kubernetes configuration: %w", err)
 	}
 
 	clientset, err := kubernetes.NewForConfig(config)
 	if err != nil {
-		slog.Error("Failed to create kubernetes clientset", "error", err)
-		os.Exit(1)
+		return fmt.Errorf("failed to create kubernetes clientset: %w", err)
 	}
 
 	id, err := os.Hostname()
 	if err != nil {
-		slog.Error("Failed to get hostname for leader election identity", "error", err)
-		os.Exit(1)
+		return fmt.Errorf("failed to get hostname for leader election identity: %w", err)
 	}
 
 	namespace := os.Getenv("POD_NAMESPACE")
@@ -369,7 +379,7 @@ func main() {
 		}
 	}()
 	defer func() {
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
 		if err := srv.Shutdown(shutdownCtx); err != nil {
 			slog.Error("metrics server shutdown error", "error", err)
@@ -396,16 +406,14 @@ func main() {
 		},
 	})
 	if err != nil {
-		slog.Error("Failed to add event handler", "error", err)
-		os.Exit(1)
+		return fmt.Errorf("failed to add event handler: %w", err)
 	}
 
 	factory.Start(ctx.Done())
 	slog.Info("Waiting for informer caches to sync...")
 	syncStart := time.Now()
 	if ok := cache.WaitForCacheSync(ctx.Done(), eventInformer.HasSynced); !ok {
-		slog.Error("Failed to wait for caches to sync")
-		os.Exit(1)
+		return fmt.Errorf("failed to wait for caches to sync")
 	}
 	metrics.informerCacheSyncDuration.Set(time.Since(syncStart).Seconds())
 	tracker.setCacheSynced()
@@ -445,6 +453,7 @@ func main() {
 		},
 	})
 	wg.Wait()
+	return nil
 }
 
 func eventTime(event *v1.Event) time.Time {
