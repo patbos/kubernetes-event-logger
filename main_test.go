@@ -5,9 +5,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"flag"
 	"log"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -2011,6 +2013,15 @@ func TestRunInvalidFlag(t *testing.T) {
 	}
 }
 
+func TestRunHelpFlag(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	err := run(ctx, []string{"-help"})
+	if !errors.Is(err, flag.ErrHelp) {
+		t.Fatalf("expected flag.ErrHelp, got %v", err)
+	}
+}
+
 func TestRunBadKubeconfig(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -2020,5 +2031,50 @@ func TestRunBadKubeconfig(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), "KUBERNETES_SERVICE_HOST") {
 		t.Errorf("error looks like an in-cluster fallback, want kubeconfig file error: %v", err)
+	}
+}
+
+func TestRunCancelledContext(t *testing.T) {
+	// kubernetes.NewForConfig only builds a struct (no network calls), so a
+	// valid-format kubeconfig pointing at a fake server gets us past flag
+	// parsing, config loading, clientset creation, and informer setup.
+	// A pre-cancelled context causes WaitForCacheSync to return false
+	// immediately, covering that whole section without needing a real cluster.
+	kubeconfig := `apiVersion: v1
+kind: Config
+clusters:
+- cluster:
+    server: https://127.0.0.1:1
+  name: test
+contexts:
+- context:
+    cluster: test
+    user: test
+  name: test
+current-context: test
+users:
+- name: test
+  user: {}
+`
+	f, err := os.CreateTemp(t.TempDir(), "kubeconfig-*.yaml")
+	if err != nil {
+		t.Fatalf("failed to create temp kubeconfig: %v", err)
+	}
+	if _, err := f.WriteString(kubeconfig); err != nil {
+		t.Fatalf("failed to write kubeconfig: %v", err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatalf("failed to close kubeconfig: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // pre-cancel so WaitForCacheSync returns false immediately
+
+	err = run(ctx, []string{"-kubeconfig=" + f.Name()})
+	if err == nil {
+		t.Fatal("expected error from cancelled context, got nil")
+	}
+	if !strings.Contains(err.Error(), "failed to wait for caches to sync") {
+		t.Errorf("unexpected error: %v", err)
 	}
 }
