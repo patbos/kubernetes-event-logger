@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"flag"
-	"fmt"
 	"log"
 	"log/slog"
 	"net/http"
@@ -474,12 +473,8 @@ func isHistorical(event *v1.Event, startTime time.Time) bool {
 }
 
 func getK8sConfig(kubeconfig string) (*rest.Config, error) {
-	config, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
-	if err != nil {
-		config, err = rest.InClusterConfig()
-		if err != nil {
-			return nil, fmt.Errorf("could not load kubeconfig or in-cluster config: %w", err)
-		}
+	if kubeconfig != "" {
+		return clientcmd.BuildConfigFromFlags("", kubeconfig)
 	}
-	return config, nil
+	return rest.InClusterConfig()
 }

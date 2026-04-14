@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -1877,12 +1878,12 @@ func TestGetK8sConfigErrorCases(t *testing.T) {
 		shouldError bool
 	}{
 		{
-			name:        "non-existent file",
+			name:        "explicit non-existent path errors immediately",
 			kubeconfig:  "/nonexistent/path/to/kubeconfig",
 			shouldError: true,
 		},
 		{
-			name:        "empty string uses default",
+			name:        "empty string attempts in-cluster config (errors outside a cluster)",
 			kubeconfig:  "",
 			shouldError: true,
 		},
@@ -1895,6 +1896,22 @@ func TestGetK8sConfigErrorCases(t *testing.T) {
 				t.Fatalf("getK8sConfig(%q) error = %v, shouldError = %v", tc.kubeconfig, err, tc.shouldError)
 			}
 		})
+	}
+}
+
+func TestGetK8sConfigExplicitPathDoesNotFallBack(t *testing.T) {
+	// When an explicit kubeconfig path is provided and fails, the error must
+	// come from the kubeconfig loader, not from in-cluster config.
+	// This ensures a bad -kubeconfig flag is always a loud failure.
+	_, err := getK8sConfig("/nonexistent/path/to/kubeconfig")
+	if err == nil {
+		t.Fatal("expected error for non-existent kubeconfig, got nil")
+	}
+	// In-cluster config failure contains "KUBERNETES_SERVICE_HOST"; a
+	// kubeconfig file error does not. If the fallback were still active,
+	// running outside a cluster would produce an in-cluster error instead.
+	if strings.Contains(err.Error(), "KUBERNETES_SERVICE_HOST") {
+		t.Errorf("error looks like an in-cluster fallback error, expected kubeconfig file error: %v", err)
 	}
 }
 
