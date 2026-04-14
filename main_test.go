@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -2474,4 +2475,79 @@ func TestEventLogEntryFormat(t *testing.T) {
 	if involvedObject["name"] != "test-pod" {
 		t.Errorf("involvedObject.name = %v, want 'test-pod'", involvedObject["name"])
 	}
+}
+
+func TestNewAppMetricsRegistersAllMetrics(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	m := newAppMetrics(reg)
+
+	// All fields must be populated.
+	if m.eventsTotal == nil {
+		t.Error("eventsTotal is nil")
+	}
+	if m.leaderGauge == nil {
+		t.Error("leaderGauge is nil")
+	}
+	if m.leaderElectionsTotal == nil {
+		t.Error("leaderElectionsTotal is nil")
+	}
+	if m.lastEventTimestamp == nil {
+		t.Error("lastEventTimestamp is nil")
+	}
+	if m.eventsFilteredTotal == nil {
+		t.Error("eventsFilteredTotal is nil")
+	}
+	if m.eventsFailedTotal == nil {
+		t.Error("eventsFailedTotal is nil")
+	}
+	if m.eventProcessingDuration == nil {
+		t.Error("eventProcessingDuration is nil")
+	}
+	if m.eventsByNamespaceTotal == nil {
+		t.Error("eventsByNamespaceTotal is nil")
+	}
+	if m.eventsByReasonTotal == nil {
+		t.Error("eventsByReasonTotal is nil")
+	}
+	if m.eventsByObjectKindTotal == nil {
+		t.Error("eventsByObjectKindTotal is nil")
+	}
+	if m.informerCacheSyncDuration == nil {
+		t.Error("informerCacheSyncDuration is nil")
+	}
+
+	// All metrics must be usable — panics here mean the metric was created
+	// but not wired correctly.
+	m.eventsTotal.WithLabelValues("Normal").Inc()
+	m.leaderGauge.Set(1)
+	m.leaderElectionsTotal.Inc()
+	m.lastEventTimestamp.SetToCurrentTime()
+	m.eventsFilteredTotal.WithLabelValues("historical").Inc()
+	m.eventsFailedTotal.WithLabelValues("marshal_error").Inc()
+	m.eventProcessingDuration.Observe(0.001)
+	m.eventsByNamespaceTotal.WithLabelValues("default").Inc()
+	m.eventsByReasonTotal.WithLabelValues("Scheduled").Inc()
+	m.eventsByObjectKindTotal.WithLabelValues("Pod").Inc()
+	m.informerCacheSyncDuration.Set(0.5)
+
+	// All metrics must be gathered from the registry without error — confirms
+	// every metric was registered and none were silently dropped.
+	mfs, err := reg.Gather()
+	if err != nil {
+		t.Fatalf("registry.Gather() error: %v", err)
+	}
+	if len(mfs) != 11 {
+		t.Errorf("gathered %d metric families, want 11", len(mfs))
+	}
+}
+
+func TestNewAppMetricsPanicsOnDuplicateRegistry(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	newAppMetrics(reg)
+	defer func() {
+		if r := recover(); r == nil {
+			t.Error("expected panic on duplicate registration, got none")
+		}
+	}()
+	newAppMetrics(reg)
 }
