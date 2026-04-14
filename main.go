@@ -291,7 +291,9 @@ func main() {
 
 	var kubeconfigDefault string
 	if home, err := os.UserHomeDir(); err == nil && home != "" {
-		kubeconfigDefault = filepath.Join(home, ".kube", "config")
+		if p := filepath.Join(home, ".kube", "config"); fileExists(p) {
+			kubeconfigDefault = p
+		}
 	}
 
 	kubeconfig := flag.String("kubeconfig", kubeconfigDefault, "(optional) absolute path to the kubeconfig file")
@@ -470,6 +472,11 @@ func eventLevel(eventType string) string {
 
 func isHistorical(event *v1.Event, startTime time.Time) bool {
 	return !eventTime(event).UTC().After(startTime)
+}
+
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }
 
 func getK8sConfig(kubeconfig string) (*rest.Config, error) {
