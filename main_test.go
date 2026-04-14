@@ -602,21 +602,13 @@ func TestEventProcessorRecordsMarshalFailures(t *testing.T) {
 }
 
 func TestCurrentLeaderStatusReadsHealthState(t *testing.T) {
-	originalIsLeader, originalLeaderStartTime := currentLeaderStatus()
-	defer func() {
-		healthState.Lock()
-		healthState.isLeader = originalIsLeader
-		healthState.leaderStartTime = originalLeaderStartTime
-		healthState.Unlock()
-	}()
-
 	expectedLeaderStartTime := time.Unix(300, 0).UTC()
-	healthState.Lock()
-	healthState.isLeader = true
-	healthState.leaderStartTime = expectedLeaderStartTime
-	healthState.Unlock()
+	tracker := &healthTracker{
+		isLeader:        true,
+		leaderStartTime: expectedLeaderStartTime,
+	}
 
-	isLeader, leaderStartTime := currentLeaderStatus()
+	isLeader, leaderStartTime := tracker.leaderStatus()
 
 	if !isLeader {
 		t.Fatal("isLeader = false, want true")
@@ -627,17 +619,16 @@ func TestCurrentLeaderStatusReadsHealthState(t *testing.T) {
 }
 
 func TestHandleHealthLeader(t *testing.T) {
-	// Setup: simulate leader state with synced cache
-	healthState.Lock()
-	healthState.isLeader = true
-	healthState.cacheSynced = true
-	healthState.startTime = time.Now().Add(-10 * time.Second)
-	healthState.Unlock()
+	tracker := &healthTracker{
+		isLeader:    true,
+		cacheSynced: true,
+		startTime:   time.Now().Add(-10 * time.Second),
+	}
 
 	req := httptest.NewRequestWithContext(context.Background(), "GET", "/healthz", nil)
 	w := httptest.NewRecorder()
 
-	handleHealth(w, req)
+	tracker.handleHealth(w, req)
 
 	// Check status code
 	if w.Code != http.StatusOK {
@@ -666,17 +657,16 @@ func TestHandleHealthLeader(t *testing.T) {
 }
 
 func TestHandleHealthNonLeader(t *testing.T) {
-	// Setup: simulate non-leader state with synced cache
-	healthState.Lock()
-	healthState.isLeader = false
-	healthState.cacheSynced = true
-	healthState.startTime = time.Now().Add(-5 * time.Second)
-	healthState.Unlock()
+	tracker := &healthTracker{
+		isLeader:    false,
+		cacheSynced: true,
+		startTime:   time.Now().Add(-5 * time.Second),
+	}
 
 	req := httptest.NewRequestWithContext(context.Background(), "GET", "/healthz", nil)
 	w := httptest.NewRecorder()
 
-	handleHealth(w, req)
+	tracker.handleHealth(w, req)
 
 	// Non-leader with synced cache should be healthy
 	if w.Code != http.StatusOK {
@@ -693,17 +683,16 @@ func TestHandleHealthNonLeader(t *testing.T) {
 }
 
 func TestHandleHealthNotReady(t *testing.T) {
-	// Setup: cache not yet synced (startup phase)
-	healthState.Lock()
-	healthState.isLeader = false
-	healthState.cacheSynced = false
-	healthState.startTime = time.Now()
-	healthState.Unlock()
+	tracker := &healthTracker{
+		isLeader:    false,
+		cacheSynced: false,
+		startTime:   time.Now(),
+	}
 
 	req := httptest.NewRequestWithContext(context.Background(), "GET", "/healthz", nil)
 	w := httptest.NewRecorder()
 
-	handleHealth(w, req)
+	tracker.handleHealth(w, req)
 
 	// Cache not synced should return ServiceUnavailable
 	if w.Code != http.StatusServiceUnavailable {
@@ -720,14 +709,12 @@ func TestHandleHealthNotReady(t *testing.T) {
 }
 
 func TestHandleHealthContentType(t *testing.T) {
-	healthState.Lock()
-	healthState.cacheSynced = true
-	healthState.Unlock()
+	tracker := &healthTracker{cacheSynced: true}
 
 	req := httptest.NewRequestWithContext(context.Background(), "GET", "/healthz", nil)
 	w := httptest.NewRecorder()
 
-	handleHealth(w, req)
+	tracker.handleHealth(w, req)
 
 	contentType := w.Header().Get("Content-Type")
 	if contentType != "application/json" {
@@ -784,17 +771,15 @@ func TestEventReportingComponent(t *testing.T) {
 }
 
 func TestHandleHealthUptime(t *testing.T) {
-	// Set a known start time
-	startTime := time.Now().Add(-100 * time.Second)
-	healthState.Lock()
-	healthState.cacheSynced = true
-	healthState.startTime = startTime
-	healthState.Unlock()
+	tracker := &healthTracker{
+		cacheSynced: true,
+		startTime:   time.Now().Add(-100 * time.Second),
+	}
 
 	req := httptest.NewRequestWithContext(context.Background(), "GET", "/healthz", nil)
 	w := httptest.NewRecorder()
 
-	handleHealth(w, req)
+	tracker.handleHealth(w, req)
 
 	resp := w.Body.String()
 	// Should have uptime_seconds field with value ~100
@@ -804,17 +789,15 @@ func TestHandleHealthUptime(t *testing.T) {
 }
 
 func TestHandleHealthUptimeZero(t *testing.T) {
-	// Set start time to slightly in the future to ensure exactly 0 or very small uptime
-	// Alternatively, just check if uptime_seconds is present and small.
-	healthState.Lock()
-	healthState.cacheSynced = true
-	healthState.startTime = time.Now()
-	healthState.Unlock()
+	tracker := &healthTracker{
+		cacheSynced: true,
+		startTime:   time.Now(),
+	}
 
 	req := httptest.NewRequestWithContext(context.Background(), "GET", "/healthz", nil)
 	w := httptest.NewRecorder()
 
-	handleHealth(w, req)
+	tracker.handleHealth(w, req)
 
 	resp := w.Body.String()
 	// Just check that uptime_seconds is present.
@@ -895,29 +878,23 @@ func TestIsHistoricalEdgeCases(t *testing.T) {
 }
 
 func TestHandleHealthLeaderTransition(t *testing.T) {
-	// Simulate transitioning from non-leader to leader
-	healthState.Lock()
-	healthState.cacheSynced = true
-	healthState.isLeader = false
-	healthState.Unlock()
+	tracker := &healthTracker{cacheSynced: true, isLeader: false}
 
 	// First request: non-leader
 	req := httptest.NewRequestWithContext(context.Background(), "GET", "/healthz", nil)
 	w := httptest.NewRecorder()
-	handleHealth(w, req)
+	tracker.handleHealth(w, req)
 	if !contains(w.Body.String(), `"leader":false`) {
 		t.Error("health check 1: expected non-leader")
 	}
 
 	// Transition to leader
-	healthState.Lock()
-	healthState.isLeader = true
-	healthState.Unlock()
+	tracker.setLeader(true, time.Time{})
 
 	// Second request: leader
 	req = httptest.NewRequestWithContext(context.Background(), "GET", "/healthz", nil)
 	w = httptest.NewRecorder()
-	handleHealth(w, req)
+	tracker.handleHealth(w, req)
 	if !contains(w.Body.String(), `"leader":true`) {
 		t.Error("health check 2: expected leader")
 	}
@@ -1058,16 +1035,16 @@ func TestEventLevelMapping(t *testing.T) {
 }
 
 func TestHandleHealthResponseStructure(t *testing.T) {
-	healthState.Lock()
-	healthState.isLeader = true
-	healthState.cacheSynced = true
-	healthState.startTime = time.Now().Add(-5 * time.Second)
-	healthState.Unlock()
+	tracker := &healthTracker{
+		isLeader:    true,
+		cacheSynced: true,
+		startTime:   time.Now().Add(-5 * time.Second),
+	}
 
 	req := httptest.NewRequestWithContext(context.Background(), "GET", "/healthz", nil)
 	w := httptest.NewRecorder()
 
-	handleHealth(w, req)
+	tracker.handleHealth(w, req)
 
 	requiredFields := []string{
 		`"status"`,
@@ -1105,14 +1082,12 @@ func TestHandleHealthStatusCodeNotReady(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			healthState.Lock()
-			healthState.cacheSynced = tc.cacheSynced
-			healthState.Unlock()
+			tracker := &healthTracker{cacheSynced: tc.cacheSynced}
 
 			req := httptest.NewRequestWithContext(context.Background(), "GET", "/healthz", nil)
 			w := httptest.NewRecorder()
 
-			handleHealth(w, req)
+			tracker.handleHealth(w, req)
 
 			if w.Code != tc.expected {
 				t.Fatalf("handleHealth status = %d, want %d", w.Code, tc.expected)
@@ -1122,19 +1097,18 @@ func TestHandleHealthStatusCodeNotReady(t *testing.T) {
 }
 
 func TestHandleHealthConcurrency(t *testing.T) {
-	// Simulate concurrent access to health endpoint
-	healthState.Lock()
-	healthState.cacheSynced = true
-	healthState.isLeader = true
-	healthState.startTime = time.Now()
-	healthState.Unlock()
+	tracker := &healthTracker{
+		cacheSynced: true,
+		isLeader:    true,
+		startTime:   time.Now(),
+	}
 
 	done := make(chan bool, 10)
 	for i := 0; i < 10; i++ {
 		go func() {
 			req := httptest.NewRequestWithContext(context.Background(), "GET", "/healthz", nil)
 			w := httptest.NewRecorder()
-			handleHealth(w, req)
+			tracker.handleHealth(w, req)
 			if w.Code != http.StatusOK {
 				t.Errorf("concurrent access failed with status %d", w.Code)
 			}
@@ -1263,14 +1237,14 @@ func TestHandleHealthLeadershipStates(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			healthState.Lock()
-			healthState.isLeader = tc.isLeader
-			healthState.cacheSynced = tc.cacheSynced
-			healthState.Unlock()
+			tracker := &healthTracker{
+				isLeader:    tc.isLeader,
+				cacheSynced: tc.cacheSynced,
+			}
 
 			req := httptest.NewRequestWithContext(context.Background(), "GET", "/healthz", nil)
 			w := httptest.NewRecorder()
-			handleHealth(w, req)
+			tracker.handleHealth(w, req)
 
 			if w.Code != tc.expectedSts {
 				t.Fatalf("handleHealth status = %d, want %d", w.Code, tc.expectedSts)
@@ -1289,13 +1263,11 @@ func TestHandleHealthLeadershipStates(t *testing.T) {
 }
 
 func TestHandleHealthVersionReported(t *testing.T) {
-	healthState.Lock()
-	healthState.cacheSynced = true
-	healthState.Unlock()
+	tracker := &healthTracker{cacheSynced: true}
 
 	req := httptest.NewRequestWithContext(context.Background(), "GET", "/healthz", nil)
 	w := httptest.NewRecorder()
-	handleHealth(w, req)
+	tracker.handleHealth(w, req)
 
 	resp := w.Body.String()
 	if !contains(resp, `"version"`) {
@@ -1590,14 +1562,12 @@ func TestEventTimestampVariations(t *testing.T) {
 }
 
 func TestHandleHealthHTTPMethods(t *testing.T) {
-	healthState.Lock()
-	healthState.cacheSynced = true
-	healthState.Unlock()
+	tracker := &healthTracker{cacheSynced: true}
 
 	// Health endpoint should handle GET requests
 	req := httptest.NewRequestWithContext(context.Background(), "GET", "/healthz", nil)
 	w := httptest.NewRecorder()
-	handleHealth(w, req)
+	tracker.handleHealth(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Errorf("GET /healthz returned %d, want %d", w.Code, http.StatusOK)
@@ -1605,16 +1575,16 @@ func TestHandleHealthHTTPMethods(t *testing.T) {
 }
 
 func TestHandleHealthMultipleCalls(t *testing.T) {
-	healthState.Lock()
-	healthState.cacheSynced = true
-	healthState.isLeader = true
-	healthState.startTime = time.Now()
-	healthState.Unlock()
+	tracker := &healthTracker{
+		cacheSynced: true,
+		isLeader:    true,
+		startTime:   time.Now(),
+	}
 
 	for i := 0; i < 5; i++ {
 		req := httptest.NewRequestWithContext(context.Background(), "GET", "/healthz", nil)
 		w := httptest.NewRecorder()
-		handleHealth(w, req)
+		tracker.handleHealth(w, req)
 
 		if w.Code != http.StatusOK {
 			t.Errorf("call %d: expected status OK, got %d", i+1, w.Code)
@@ -1699,18 +1669,18 @@ func TestEventLevelCaseSensitivity(t *testing.T) {
 }
 
 func TestHandleHealthConsistency(t *testing.T) {
-	healthState.Lock()
-	healthState.isLeader = true
-	healthState.cacheSynced = true
-	healthState.startTime = time.Now().Add(-10 * time.Second)
-	healthState.Unlock()
+	tracker := &healthTracker{
+		isLeader:    true,
+		cacheSynced: true,
+		startTime:   time.Now().Add(-10 * time.Second),
+	}
 
 	// Make multiple requests and verify consistency
 	responses := make([]string, 3)
 	for i := 0; i < 3; i++ {
 		req := httptest.NewRequestWithContext(context.Background(), "GET", "/healthz", nil)
 		w := httptest.NewRecorder()
-		handleHealth(w, req)
+		tracker.handleHealth(w, req)
 		responses[i] = w.Body.String()
 
 		// All should contain the same status
@@ -1959,15 +1929,15 @@ func TestParseEventFilterReportingComponentVariants(t *testing.T) {
 }
 
 func TestHandleHealthJSONValid(t *testing.T) {
-	healthState.Lock()
-	healthState.cacheSynced = true
-	healthState.isLeader = true
-	healthState.startTime = time.Now().Add(-5 * time.Second)
-	healthState.Unlock()
+	tracker := &healthTracker{
+		cacheSynced: true,
+		isLeader:    true,
+		startTime:   time.Now().Add(-5 * time.Second),
+	}
 
 	req := httptest.NewRequestWithContext(context.Background(), "GET", "/healthz", nil)
 	w := httptest.NewRecorder()
-	handleHealth(w, req)
+	tracker.handleHealth(w, req)
 
 	resp := w.Body.String()
 	if !contains(resp, "{") || !contains(resp, "}") {
@@ -2288,15 +2258,15 @@ func TestEventLevelOutputMapping(t *testing.T) {
 }
 
 func TestHealthEndpointJSONStructure(t *testing.T) {
-	healthState.Lock()
-	healthState.cacheSynced = true
-	healthState.isLeader = true
-	healthState.startTime = time.Now().Add(-10 * time.Second)
-	healthState.Unlock()
+	tracker := &healthTracker{
+		cacheSynced: true,
+		isLeader:    true,
+		startTime:   time.Now().Add(-10 * time.Second),
+	}
 
 	req := httptest.NewRequestWithContext(context.Background(), "GET", "/healthz", nil)
 	w := httptest.NewRecorder()
-	handleHealth(w, req)
+	tracker.handleHealth(w, req)
 
 	var response map[string]interface{}
 	err := json.Unmarshal(w.Body.Bytes(), &response)

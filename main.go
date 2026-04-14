@@ -59,28 +59,176 @@ type eventProcessorMetrics interface {
 	observeProcessingDuration(duration time.Duration)
 }
 
-type prometheusEventProcessorMetrics struct{}
+// healthTracker tracks pod health and leader state.
+// All fields are protected by mu; callers must use the provided methods.
+type healthTracker struct {
+	mu              sync.RWMutex
+	isLeader        bool
+	cacheSynced     bool
+	startTime       time.Time
+	leaderStartTime time.Time
+}
 
-func (prometheusEventProcessorMetrics) eventLogged(event *v1.Event, detailedMetrics bool) {
-	eventsTotal.WithLabelValues(event.Type).Inc()
-	if detailedMetrics {
-		eventsByNamespaceTotal.WithLabelValues(event.InvolvedObject.Namespace).Inc()
-		eventsByReasonTotal.WithLabelValues(event.Reason).Inc()
-		eventsByObjectKindTotal.WithLabelValues(event.InvolvedObject.Kind).Inc()
+func newHealthTracker() *healthTracker {
+	return &healthTracker{startTime: time.Now()}
+}
+
+func (h *healthTracker) setLeader(isLeader bool, startTime time.Time) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.isLeader = isLeader
+	if isLeader {
+		h.leaderStartTime = startTime
 	}
-	lastEventTimestamp.SetToCurrentTime()
 }
 
-func (prometheusEventProcessorMetrics) eventFiltered(filterType string) {
-	eventsFilteredTotal.WithLabelValues(filterType).Inc()
+func (h *healthTracker) setCacheSynced() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.cacheSynced = true
 }
 
-func (prometheusEventProcessorMetrics) eventFailed(reason string) {
-	eventsFailedTotal.WithLabelValues(reason).Inc()
+func (h *healthTracker) leaderStatus() (bool, time.Time) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return h.isLeader, h.leaderStartTime
 }
 
-func (prometheusEventProcessorMetrics) observeProcessingDuration(duration time.Duration) {
-	eventProcessingDuration.Observe(duration.Seconds())
+func (h *healthTracker) handleHealth(w http.ResponseWriter, _ *http.Request) {
+	h.mu.RLock()
+	isLeader := h.isLeader
+	cacheSynced := h.cacheSynced
+	uptime := time.Since(h.startTime).Seconds()
+	h.mu.RUnlock()
+
+	status := "healthy"
+	statusCode := http.StatusOK
+	if !cacheSynced {
+		status = "not-ready"
+		statusCode = http.StatusServiceUnavailable
+	}
+
+	response := map[string]interface{}{
+		"status":         status,
+		"leader":         isLeader,
+		"cache_synced":   cacheSynced,
+		"uptime_seconds": uptime,
+		"version":        version,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(statusCode)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		slog.Error("Failed to encode health response", "error", err)
+	}
+}
+
+// appMetrics holds all Prometheus metrics for the application.
+type appMetrics struct {
+	eventsTotal               *prometheus.CounterVec
+	leaderGauge               prometheus.Gauge
+	leaderElectionsTotal      prometheus.Counter
+	lastEventTimestamp        prometheus.Gauge
+	eventsFilteredTotal       *prometheus.CounterVec
+	eventsFailedTotal         *prometheus.CounterVec
+	eventProcessingDuration   prometheus.Histogram
+	eventsByNamespaceTotal    *prometheus.CounterVec
+	eventsByReasonTotal       *prometheus.CounterVec
+	eventsByObjectKindTotal   *prometheus.CounterVec
+	informerCacheSyncDuration prometheus.Gauge
+}
+
+func newAppMetrics(reg prometheus.Registerer) *appMetrics {
+	m := &appMetrics{
+		eventsTotal: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "kubernetes_event_logger_events_total",
+				Help: "Total number of Kubernetes events received and logged.",
+			},
+			[]string{"type"},
+		),
+		leaderGauge: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "kubernetes_event_logger_leader",
+			Help: "1 if this instance is the current leader, 0 otherwise.",
+		}),
+		leaderElectionsTotal: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "kubernetes_event_logger_leader_elections_total",
+			Help: "Total number of times this instance acquired leadership.",
+		}),
+		lastEventTimestamp: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "kubernetes_event_logger_last_event_processed_timestamp_seconds",
+			Help: "Unix timestamp of the last successfully processed event.",
+		}),
+		eventsFilteredTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "kubernetes_event_logger_events_filtered_total",
+			Help: "Total number of events filtered out before logging.",
+		}, []string{"filter_type"}),
+		eventsFailedTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "kubernetes_event_logger_events_failed_total",
+			Help: "Total number of events that failed to process.",
+		}, []string{"reason"}),
+		eventProcessingDuration: prometheus.NewHistogram(prometheus.HistogramOpts{
+			Name:    "kubernetes_event_logger_event_processing_duration_seconds",
+			Help:    "Time taken to process (marshal and log) a single event.",
+			Buckets: prometheus.DefBuckets,
+		}),
+		eventsByNamespaceTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "kubernetes_event_logger_events_by_namespace_total",
+			Help: "Total number of events logged, broken down by namespace.",
+		}, []string{"namespace"}),
+		eventsByReasonTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "kubernetes_event_logger_events_by_reason_total",
+			Help: "Total number of events logged, broken down by reason.",
+		}, []string{"reason"}),
+		eventsByObjectKindTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "kubernetes_event_logger_events_by_object_kind_total",
+			Help: "Total number of events logged, broken down by involved object kind.",
+		}, []string{"object_kind"}),
+		informerCacheSyncDuration: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "kubernetes_event_logger_informer_cache_sync_duration_seconds",
+			Help: "Time taken for the informer cache to sync on startup (seconds).",
+		}),
+	}
+	reg.MustRegister(
+		m.eventsTotal,
+		m.leaderGauge,
+		m.leaderElectionsTotal,
+		m.lastEventTimestamp,
+		m.eventsFilteredTotal,
+		m.eventsFailedTotal,
+		m.eventProcessingDuration,
+		m.eventsByNamespaceTotal,
+		m.eventsByReasonTotal,
+		m.eventsByObjectKindTotal,
+		m.informerCacheSyncDuration,
+	)
+	return m
+}
+
+type prometheusEventProcessorMetrics struct {
+	m *appMetrics
+}
+
+func (p prometheusEventProcessorMetrics) eventLogged(event *v1.Event, detailedMetrics bool) {
+	p.m.eventsTotal.WithLabelValues(event.Type).Inc()
+	if detailedMetrics {
+		p.m.eventsByNamespaceTotal.WithLabelValues(event.InvolvedObject.Namespace).Inc()
+		p.m.eventsByReasonTotal.WithLabelValues(event.Reason).Inc()
+		p.m.eventsByObjectKindTotal.WithLabelValues(event.InvolvedObject.Kind).Inc()
+	}
+	p.m.lastEventTimestamp.SetToCurrentTime()
+}
+
+func (p prometheusEventProcessorMetrics) eventFiltered(filterType string) {
+	p.m.eventsFilteredTotal.WithLabelValues(filterType).Inc()
+}
+
+func (p prometheusEventProcessorMetrics) eventFailed(reason string) {
+	p.m.eventsFailedTotal.WithLabelValues(reason).Inc()
+}
+
+func (p prometheusEventProcessorMetrics) observeProcessingDuration(duration time.Duration) {
+	p.m.eventProcessingDuration.Observe(duration.Seconds())
 }
 
 func newEventProcessor(
@@ -136,86 +284,6 @@ func (p *eventProcessor) process(obj interface{}) {
 	p.logger.Printf("%s\n", string(wrapper))
 	p.metrics.eventLogged(event, p.detailedMetrics)
 	p.metrics.observeProcessingDuration(p.now().Sub(start))
-}
-
-// Health state tracking
-var (
-	healthState = struct {
-		sync.RWMutex
-		isLeader        bool
-		cacheSynced     bool
-		startTime       time.Time
-		leaderStartTime time.Time
-	}{
-		startTime: time.Now(),
-	}
-)
-
-var (
-	eventsTotal = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Name: "kubernetes_event_logger_events_total",
-			Help: "Total number of Kubernetes events received and logged.",
-		},
-		[]string{"type"},
-	)
-	leaderGauge = prometheus.NewGauge(prometheus.GaugeOpts{
-		Name: "kubernetes_event_logger_leader",
-		Help: "1 if this instance is the current leader, 0 otherwise.",
-	})
-	leaderElectionsTotal = prometheus.NewCounter(prometheus.CounterOpts{
-		Name: "kubernetes_event_logger_leader_elections_total",
-		Help: "Total number of times this instance acquired leadership.",
-	})
-	lastEventTimestamp = prometheus.NewGauge(prometheus.GaugeOpts{
-		Name: "kubernetes_event_logger_last_event_processed_timestamp_seconds",
-		Help: "Unix timestamp of the last successfully processed event.",
-	})
-	eventsFilteredTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
-		Name: "kubernetes_event_logger_events_filtered_total",
-		Help: "Total number of events filtered out before logging.",
-	}, []string{"filter_type"})
-	eventsFailedTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
-		Name: "kubernetes_event_logger_events_failed_total",
-		Help: "Total number of events that failed to process.",
-	}, []string{"reason"})
-	eventProcessingDuration = prometheus.NewHistogram(prometheus.HistogramOpts{
-		Name:    "kubernetes_event_logger_event_processing_duration_seconds",
-		Help:    "Time taken to process (marshal and log) a single event.",
-		Buckets: prometheus.DefBuckets,
-	})
-	eventsByNamespaceTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
-		Name: "kubernetes_event_logger_events_by_namespace_total",
-		Help: "Total number of events logged, broken down by namespace.",
-	}, []string{"namespace"})
-	eventsByReasonTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
-		Name: "kubernetes_event_logger_events_by_reason_total",
-		Help: "Total number of events logged, broken down by reason.",
-	}, []string{"reason"})
-	eventsByObjectKindTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
-		Name: "kubernetes_event_logger_events_by_object_kind_total",
-		Help: "Total number of events logged, broken down by involved object kind.",
-	}, []string{"object_kind"})
-	informerCacheSyncDuration = prometheus.NewGauge(prometheus.GaugeOpts{
-		Name: "kubernetes_event_logger_informer_cache_sync_duration_seconds",
-		Help: "Time taken for the informer cache to sync on startup (seconds).",
-	})
-)
-
-func init() {
-	prometheus.MustRegister(
-		eventsTotal,
-		leaderGauge,
-		leaderElectionsTotal,
-		lastEventTimestamp,
-		eventsFilteredTotal,
-		eventsFailedTotal,
-		eventProcessingDuration,
-		eventsByNamespaceTotal,
-		eventsByReasonTotal,
-		eventsByObjectKindTotal,
-		informerCacheSyncDuration,
-	)
 }
 
 func main() {
@@ -278,10 +346,14 @@ func main() {
 		},
 	}
 
+	reg := prometheus.NewRegistry()
+	metrics := newAppMetrics(reg)
+	tracker := newHealthTracker()
+
 	mux := http.NewServeMux()
-	mux.Handle("/metrics", promhttp.Handler())
-	mux.HandleFunc("/healthz", handleHealth)
-	mux.HandleFunc("/readyz", handleHealth)
+	mux.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
+	mux.HandleFunc("/healthz", tracker.handleHealth)
+	mux.HandleFunc("/readyz", tracker.handleHealth)
 	srv := &http.Server{
 		Addr:              ":8080",
 		Handler:           mux,
@@ -304,11 +376,11 @@ func main() {
 	}()
 
 	eventProcessor := newEventProcessor(
-		currentLeaderStatus,
+		tracker.leaderStatus,
 		excludeFilters,
 		loggerEvent,
 		*enableDetailedMetrics,
-		prometheusEventProcessorMetrics{},
+		prometheusEventProcessorMetrics{m: metrics},
 	)
 
 	// Sync cache for all pods (leader and standby) before leader election
@@ -334,10 +406,8 @@ func main() {
 		slog.Error("Failed to wait for caches to sync")
 		os.Exit(1)
 	}
-	informerCacheSyncDuration.Set(time.Since(syncStart).Seconds())
-	healthState.Lock()
-	healthState.cacheSynced = true
-	healthState.Unlock()
+	metrics.informerCacheSyncDuration.Set(time.Since(syncStart).Seconds())
+	tracker.setCacheSynced()
 	slog.Info("Caches synced. Ready for event processing...")
 
 	var wg sync.WaitGroup
@@ -352,22 +422,17 @@ func main() {
 		Callbacks: leaderelection.LeaderCallbacks{
 			OnStartedLeading: func(ctx context.Context) {
 				defer wg.Done()
-				leaderGauge.Set(1)
+				metrics.leaderGauge.Set(1)
 				startTime := time.Now().UTC()
-				healthState.Lock()
-				healthState.isLeader = true
-				healthState.leaderStartTime = startTime
-				healthState.Unlock()
-				leaderElectionsTotal.Inc()
+				tracker.setLeader(true, startTime)
+				metrics.leaderElectionsTotal.Inc()
 				slog.Info("Became leader. Starting to process events.", "start_time", startTime.Format(time.RFC3339))
 				<-ctx.Done()
 				slog.Info("Shutting down event processing.")
 			},
 			OnStoppedLeading: func() {
-				leaderGauge.Set(0)
-				healthState.Lock()
-				healthState.isLeader = false
-				healthState.Unlock()
+				metrics.leaderGauge.Set(0)
+				tracker.setLeader(false, time.Time{})
 				slog.Info("Lost leadership, entering standby mode.")
 			},
 			OnNewLeader: func(identity string) {
@@ -404,12 +469,6 @@ func eventLevel(eventType string) string {
 	return "debug"
 }
 
-func currentLeaderStatus() (bool, time.Time) {
-	healthState.RLock()
-	defer healthState.RUnlock()
-	return healthState.isLeader, healthState.leaderStartTime
-}
-
 func isHistorical(event *v1.Event, startTime time.Time) bool {
 	return !eventTime(event).UTC().After(startTime)
 }
@@ -423,40 +482,4 @@ func getK8sConfig(kubeconfig string) (*rest.Config, error) {
 		}
 	}
 	return config, nil
-}
-
-func handleHealth(w http.ResponseWriter, _ *http.Request) {
-	healthState.RLock()
-	isLeader := healthState.isLeader
-	cacheSynced := healthState.cacheSynced
-	uptime := time.Since(healthState.startTime).Seconds()
-	healthState.RUnlock()
-
-	// Determine overall health status
-	status := "healthy"
-	statusCode := http.StatusOK
-
-	// Liveness: pod is running if cache is synced (can serve or become leader)
-	// Readiness: pod is ready if cache is synced (doesn't require leadership)
-	// Non-leader pods are healthy and waiting to take over
-	isHealthy := cacheSynced
-
-	if !isHealthy {
-		status = "not-ready"
-		statusCode = http.StatusServiceUnavailable
-	}
-
-	response := map[string]interface{}{
-		"status":         status,
-		"leader":         isLeader,
-		"cache_synced":   cacheSynced,
-		"uptime_seconds": uptime,
-		"version":        version,
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(statusCode)
-	if err := json.NewEncoder(w).Encode(response); err != nil {
-		slog.Error("Failed to encode health response", "error", err)
-	}
 }
