@@ -8,10 +8,9 @@ import (
 	"log"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
-
-	"strings"
 
 	"github.com/prometheus/client_golang/prometheus"
 	v1 "k8s.io/api/core/v1"
