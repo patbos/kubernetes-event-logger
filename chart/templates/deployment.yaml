@@ -90,3 +90,25 @@ spec:
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- with .Values.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- range . }}
+        - maxSkew: {{ .maxSkew }}
+          topologyKey: {{ .topologyKey }}
+          whenUnsatisfiable: {{ .whenUnsatisfiable }}
+          {{- if .labelSelector }}
+          labelSelector:
+            {{- if .labelSelector.matchLabels }}
+            matchLabels:
+              {{- toYaml .labelSelector.matchLabels | nindent 14 }}
+            {{- else }}
+            matchLabels:
+              {{- include "kubernetes-event-logger.selectorLabels" $ | nindent 14 }}
+            {{- end }}
+          {{- else }}
+          labelSelector:
+            matchLabels:
+              {{- include "kubernetes-event-logger.selectorLabels" $ | nindent 14 }}
+          {{- end }}
+        {{- end }}
+      {{- end }}
