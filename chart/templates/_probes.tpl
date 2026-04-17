@@ -7,7 +7,9 @@ httpGet:
   path: {{ .path }}
   port: {{ .port }}
   scheme: HTTP
+{{- if .config.initialDelaySeconds }}
 initialDelaySeconds: {{ .config.initialDelaySeconds }}
+{{- end }}
 periodSeconds: {{ .config.periodSeconds }}
 timeoutSeconds: {{ .config.timeoutSeconds }}
 failureThreshold: {{ .config.failureThreshold }}
