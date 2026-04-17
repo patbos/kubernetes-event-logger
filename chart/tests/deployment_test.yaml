@@ -214,6 +214,17 @@ tests:
             app.kubernetes.io/name: my-logger
             app.kubernetes.io/instance: RELEASE-NAME
 
+  - it: should render default anti-affinity when affinity is null
+    set:
+      affinity: null
+    asserts:
+      - equal:
+          path: spec.template.spec.affinity.podAntiAffinity.preferredDuringSchedulingIgnoredDuringExecution[0].weight
+          value: 100
+      - equal:
+          path: spec.template.spec.affinity.podAntiAffinity.preferredDuringSchedulingIgnoredDuringExecution[0].podAffinityTerm.topologyKey
+          value: kubernetes.io/hostname
+
   - it: should use custom affinity when provided
     set:
       affinity:
