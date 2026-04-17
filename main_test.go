@@ -1931,9 +1931,9 @@ func TestEventLogEntryFormat(t *testing.T) {
 
 func TestNewAppMetricsRegistersAllMetrics(t *testing.T) {
 	reg := prometheus.NewRegistry()
-	m := newAppMetrics(reg)
+	m := newAppMetrics(reg, true)
 
-	// All fields must be populated.
+	// All fields must be populated when detailed metrics are enabled.
 	if m.eventsTotal == nil {
 		t.Error("eventsTotal is nil")
 	}
@@ -1993,15 +1993,59 @@ func TestNewAppMetricsRegistersAllMetrics(t *testing.T) {
 	}
 }
 
+func TestNewAppMetricsWithoutDetailedMetrics(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	m := newAppMetrics(reg, false)
+
+	// Core metrics must be populated.
+	if m.eventsTotal == nil {
+		t.Error("eventsTotal is nil")
+	}
+	if m.leaderGauge == nil {
+		t.Error("leaderGauge is nil")
+	}
+	if m.informerCacheSyncDuration == nil {
+		t.Error("informerCacheSyncDuration is nil")
+	}
+
+	// Detailed metrics must NOT be registered.
+	if m.eventsByNamespaceTotal != nil {
+		t.Error("eventsByNamespaceTotal should be nil when detailed metrics are disabled")
+	}
+	if m.eventsByReasonTotal != nil {
+		t.Error("eventsByReasonTotal should be nil when detailed metrics are disabled")
+	}
+	if m.eventsByObjectKindTotal != nil {
+		t.Error("eventsByObjectKindTotal should be nil when detailed metrics are disabled")
+	}
+
+	// Only core metrics should be gathered (8 instead of 11).
+	m.eventsTotal.WithLabelValues("Normal").Inc()
+	m.leaderGauge.Set(1)
+	m.leaderElectionsTotal.Inc()
+	m.lastEventTimestamp.SetToCurrentTime()
+	m.eventsFilteredTotal.WithLabelValues("historical").Inc()
+	m.eventsFailedTotal.WithLabelValues("marshal_error").Inc()
+	m.eventProcessingDuration.Observe(0.001)
+	m.informerCacheSyncDuration.Set(0.5)
+	mfs, err := reg.Gather()
+	if err != nil {
+		t.Fatalf("registry.Gather() error: %v", err)
+	}
+	if len(mfs) != 8 {
+		t.Errorf("gathered %d metric families, want 8", len(mfs))
+	}
+}
+
 func TestNewAppMetricsPanicsOnDuplicateRegistry(t *testing.T) {
 	reg := prometheus.NewRegistry()
-	newAppMetrics(reg)
+	newAppMetrics(reg, true)
 	defer func() {
 		if r := recover(); r == nil {
 			t.Error("expected panic on duplicate registration, got none")
 		}
 	}()
-	newAppMetrics(reg)
+	newAppMetrics(reg, true)
 }
 
 func TestRunInvalidFlag(t *testing.T) {
