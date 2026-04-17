@@ -2078,3 +2078,44 @@ users:
 		t.Errorf("unexpected error: %v", err)
 	}
 }
+
+func TestLeaderCallbackTrackerWaitReturnsForStandby(t *testing.T) {
+	tracker := newLeaderCallbackTracker()
+	done := make(chan struct{})
+
+	go func() {
+		tracker.wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("wait blocked even though leadership never started")
+	}
+}
+
+func TestLeaderCallbackTrackerWaitsForLeaderCallback(t *testing.T) {
+	tracker := newLeaderCallbackTracker()
+	tracker.markStarted()
+
+	done := make(chan struct{})
+	go func() {
+		tracker.wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		t.Fatal("wait returned before leader callback completed")
+	case <-time.After(10 * time.Millisecond):
+	}
+
+	tracker.markDone()
+
+	select {
+	case <-done:
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("wait did not return after leader callback completed")
+	}
+}

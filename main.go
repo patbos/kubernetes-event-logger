@@ -59,6 +59,41 @@ type eventProcessorMetrics interface {
 	observeProcessingDuration(duration time.Duration)
 }
 
+type leaderCallbackTracker struct {
+	started chan struct{}
+	done    chan struct{}
+
+	startedOnce sync.Once
+	doneOnce    sync.Once
+}
+
+func newLeaderCallbackTracker() *leaderCallbackTracker {
+	return &leaderCallbackTracker{
+		started: make(chan struct{}),
+		done:    make(chan struct{}),
+	}
+}
+
+func (t *leaderCallbackTracker) markStarted() {
+	t.startedOnce.Do(func() {
+		close(t.started)
+	})
+}
+
+func (t *leaderCallbackTracker) markDone() {
+	t.doneOnce.Do(func() {
+		close(t.done)
+	})
+}
+
+func (t *leaderCallbackTracker) wait() {
+	select {
+	case <-t.started:
+		<-t.done
+	default:
+	}
+}
+
 // healthTracker tracks pod health and leader state.
 // All fields are protected by mu; callers must use the provided methods.
 type healthTracker struct {
@@ -419,9 +454,8 @@ func run(ctx context.Context, args []string) error {
 	tracker.setCacheSynced()
 	slog.Info("Caches synced. Ready for event processing...")
 
-	var wg sync.WaitGroup
+	callbackTracker := newLeaderCallbackTracker()
 	var lastLeader string
-	wg.Add(1)
 	leaderelection.RunOrDie(ctx, leaderelection.LeaderElectionConfig{
 		Lock:            lock,
 		ReleaseOnCancel: true,
@@ -430,7 +464,8 @@ func run(ctx context.Context, args []string) error {
 		RetryPeriod:     *retryPeriod,
 		Callbacks: leaderelection.LeaderCallbacks{
 			OnStartedLeading: func(ctx context.Context) {
-				defer wg.Done()
+				callbackTracker.markStarted()
+				defer callbackTracker.markDone()
 				metrics.leaderGauge.Set(1)
 				startTime := time.Now().UTC()
 				tracker.setLeader(true, startTime)
@@ -452,7 +487,7 @@ func run(ctx context.Context, args []string) error {
 			},
 		},
 	})
-	wg.Wait()
+	callbackTracker.wait()
 	return nil
 }
 
