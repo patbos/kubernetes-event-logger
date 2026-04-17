@@ -89,9 +89,9 @@ nodeSelector: {}
 tolerations: []
 
 # Pod anti-affinity: spread replicas across nodes for better availability.
-# Default uses the chart's selector labels so it works with nameOverride/fullnameOverride.
-# Set to {} to disable, or provide a custom affinity block.
-affinity: {}
+# Default (null) activates built-in anti-affinity using the chart's selector labels.
+# Set a non-empty affinity block to override the default anti-affinity.
+affinity: null
 
 # Topology spread constraints for fine-grained pod distribution (Kubernetes 1.19+).
 # Use this to spread replicas across zones or other topology domains.
