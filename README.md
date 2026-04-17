@@ -146,14 +146,15 @@ helm install kubernetes-event-logger oci://ghcr.io/patbos/kubernetes-event-logge
 
 The binary first tries the supplied kubeconfig path. If that fails, it falls back to in-cluster configuration.
 
-- Default `-kubeconfig`: `~/.kube/config` when a home directory is available
+- Default `-kubeconfig`: `~/.kube/config` when the file exists; otherwise falls back to in-cluster config
 - In Kubernetes, set `POD_NAMESPACE` from `metadata.namespace` so leader election uses the correct namespace
 
 ### Command-line Flags
 
 | Flag | Description | Default |
 |---|---|---|
-| `-kubeconfig` | Path to kubeconfig file; falls back to in-cluster config if loading fails | `~/.kube/config` |
+| `-kubeconfig` | Path to kubeconfig file; falls back to in-cluster config when not set | `~/.kube/config` if it exists, otherwise empty |
+| `-lease-name` | Name of the leader election Lease resource | `kubernetes-event-logger` |
 | `-lease-duration` | Duration a leader lease remains valid | `15s` |
 | `-renew-deadline` | Time the leader has to renew the lease | `10s` |
 | `-retry-period` | Retry interval for acquiring or renewing the lease | `2s` |
@@ -214,9 +215,17 @@ Common chart values:
 | `serviceMonitor.enabled` | Create a Prometheus Operator `ServiceMonitor` | `false` |
 | `networkPolicy.enabled` | Create a `NetworkPolicy` for metrics ingress and DNS/API egress | `false` |
 | `podDisruptionBudget.enabled` | Create a PodDisruptionBudget | `true` |
+| `podDisruptionBudget.minAvailable` | Minimum available pods during voluntary disruptions | `1` |
 | `resources` | Pod resource requests and limits | see [`chart/values.yaml`](chart/values.yaml) |
+| `affinity` | Custom affinity rules; `null` activates built-in pod anti-affinity | `null` |
+| `topologySpreadConstraints` | Topology spread constraints for pod distribution | `[]` |
+| `tolerations` | Pod tolerations | `[]` |
+| `nodeSelector` | Node selector for pod scheduling | `{}` |
+| `priorityClassName` | Priority class for pods | `""` |
+| `terminationGracePeriodSeconds` | Grace period for graceful shutdown | `30` |
+| `strategy` | Deployment update strategy | RollingUpdate (maxSurge=0, maxUnavailable=1) |
 
-See [`chart/values.yaml`](chart/values.yaml) for the full chart surface, including probes, affinity, tolerations, security context, and ServiceMonitor labels.
+See [`chart/values.yaml`](chart/values.yaml) for the full chart surface, including probes, port configuration, security context, and ServiceMonitor labels.
 
 ## High Availability
 
