@@ -173,7 +173,7 @@ type appMetrics struct {
 	informerCacheSyncDuration prometheus.Gauge
 }
 
-func newAppMetrics(reg prometheus.Registerer) *appMetrics {
+func newAppMetrics(reg prometheus.Registerer, enableDetailedMetrics bool) *appMetrics {
 	m := &appMetrics{
 		eventsTotal: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
@@ -207,18 +207,6 @@ func newAppMetrics(reg prometheus.Registerer) *appMetrics {
 			Help:    "Time taken to process (marshal and log) a single event.",
 			Buckets: prometheus.DefBuckets,
 		}),
-		eventsByNamespaceTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Name: "kubernetes_event_logger_events_by_namespace_total",
-			Help: "Total number of events logged, broken down by namespace.",
-		}, []string{"namespace"}),
-		eventsByReasonTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Name: "kubernetes_event_logger_events_by_reason_total",
-			Help: "Total number of events logged, broken down by reason.",
-		}, []string{"reason"}),
-		eventsByObjectKindTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Name: "kubernetes_event_logger_events_by_object_kind_total",
-			Help: "Total number of events logged, broken down by involved object kind.",
-		}, []string{"object_kind"}),
 		informerCacheSyncDuration: prometheus.NewGauge(prometheus.GaugeOpts{
 			Name: "kubernetes_event_logger_informer_cache_sync_duration_seconds",
 			Help: "Time taken for the informer cache to sync on startup (seconds).",
@@ -232,11 +220,27 @@ func newAppMetrics(reg prometheus.Registerer) *appMetrics {
 		m.eventsFilteredTotal,
 		m.eventsFailedTotal,
 		m.eventProcessingDuration,
-		m.eventsByNamespaceTotal,
-		m.eventsByReasonTotal,
-		m.eventsByObjectKindTotal,
 		m.informerCacheSyncDuration,
 	)
+	if enableDetailedMetrics {
+		m.eventsByNamespaceTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "kubernetes_event_logger_events_by_namespace_total",
+			Help: "Total number of events logged, broken down by namespace.",
+		}, []string{"namespace"})
+		m.eventsByReasonTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "kubernetes_event_logger_events_by_reason_total",
+			Help: "Total number of events logged, broken down by reason.",
+		}, []string{"reason"})
+		m.eventsByObjectKindTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "kubernetes_event_logger_events_by_object_kind_total",
+			Help: "Total number of events logged, broken down by involved object kind.",
+		}, []string{"object_kind"})
+		reg.MustRegister(
+			m.eventsByNamespaceTotal,
+			m.eventsByReasonTotal,
+			m.eventsByObjectKindTotal,
+		)
+	}
 	return m
 }
 
@@ -246,7 +250,7 @@ type prometheusEventProcessorMetrics struct {
 
 func (p prometheusEventProcessorMetrics) eventLogged(event *v1.Event, detailedMetrics bool) {
 	p.m.eventsTotal.WithLabelValues(event.Type).Inc()
-	if detailedMetrics {
+	if detailedMetrics && p.m.eventsByNamespaceTotal != nil {
 		p.m.eventsByNamespaceTotal.WithLabelValues(event.InvolvedObject.Namespace).Inc()
 		p.m.eventsByReasonTotal.WithLabelValues(event.Reason).Inc()
 		p.m.eventsByObjectKindTotal.WithLabelValues(event.InvolvedObject.Kind).Inc()
@@ -393,7 +397,7 @@ func run(ctx context.Context, args []string) error {
 	}
 
 	reg := prometheus.NewRegistry()
-	metrics := newAppMetrics(reg)
+	metrics := newAppMetrics(reg, *enableDetailedMetrics)
 	tracker := newHealthTracker()
 
 	mux := http.NewServeMux()
