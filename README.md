@@ -158,6 +158,7 @@ The binary first tries the supplied kubeconfig path. If that fails, it falls bac
 | `-lease-duration` | Duration a leader lease remains valid | `15s` |
 | `-renew-deadline` | Time the leader has to renew the lease | `10s` |
 | `-retry-period` | Retry interval for acquiring or renewing the lease | `2s` |
+| `-log-format` | Event JSON log format: `flat`, `legacy`, or `message` | `flat` |
 | `-enable-detailed-metrics` | Enable high-cardinality metrics (namespace, reason, kind) | `false` |
 | `-exclude-filter` | Exclude events matching all clauses in one rule; repeatable | none |
 
@@ -208,6 +209,7 @@ Common chart values:
 | `serviceAccount.create` | Create a dedicated ServiceAccount for this release | `true` |
 | `serviceAccount.name` | ServiceAccount name override; required when `serviceAccount.create=false` | `""` |
 | `excludeFilters` | List of event exclusion rules | `[]` |
+| `logFormat` | Event JSON log format: `flat`, `legacy`, or `message` | `flat` |
 | `enableDetailedMetrics` | Enable high-cardinality Prometheus metrics | `false` |
 | `leaderElection.leaseDuration` | Leader lease duration | `15s` |
 | `leaderElection.renewDeadline` | Lease renew deadline | `10s` |
@@ -304,11 +306,15 @@ Prometheus metrics currently exposed at `/metrics`:
 
 ## Output Format
 
-Each log line is a JSON object with:
+Each log line is a JSON object. The default `-log-format=flat` emits selected event fields as top-level JSON fields.
+
+`-log-format=legacy` emits the previous envelope with:
 
 - `time`: event timestamp chosen from `eventTime`, `series.lastObservedTime`, `lastTimestamp`, or `firstTimestamp` (in that order)
 - `level`: derived from event type (`Warning` -> `warn`, `Normal` -> `info`, other values -> `debug`)
 - `event`: the original Kubernetes event object
+
+`-log-format=message` emits only `time`, `level`, and `message`.
 
 Example:
 

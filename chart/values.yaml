@@ -126,6 +126,9 @@ leaderElection:
   renewDeadline: 10s      # Time leader has to renew lease before losing it
   retryPeriod: 2s         # Retry interval for acquiring/renewing lease
 
+# Event JSON log format. Supported values: flat, legacy, message.
+logFormat: flat
+
 # Enable high-cardinality metrics (events by namespace, reason, and object kind).
 # Recommendation: Keep disabled in large clusters to avoid Prometheus performance issues.
 enableDetailedMetrics: false

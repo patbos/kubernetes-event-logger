@@ -49,6 +49,7 @@ spec:
             - -lease-duration={{ .Values.leaderElection.leaseDuration }}
             - -renew-deadline={{ .Values.leaderElection.renewDeadline }}
             - -retry-period={{ .Values.leaderElection.retryPeriod }}
+            - -log-format={{ .Values.logFormat }}
             {{- if .Values.enableDetailedMetrics }}
             - -enable-detailed-metrics
             {{- end }}

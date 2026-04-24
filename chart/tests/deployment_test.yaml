@@ -162,6 +162,14 @@ tests:
           path: spec.template.spec.containers[0].args
           content: -enable-detailed-metrics
 
+  - it: should pass log format arg
+    set:
+      logFormat: flat
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: -log-format=flat
+
   - it: should pass exclude filter args
     set:
       excludeFilters:
