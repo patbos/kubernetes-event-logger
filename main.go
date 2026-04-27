@@ -40,6 +40,75 @@ type eventLogEntry struct {
 	Event *v1.Event `json:"event"`
 }
 
+type flatEventLogEntry struct {
+	Time                time.Time `json:"time"`
+	Level               string    `json:"level"`
+	Namespace           string    `json:"namespace,omitempty"`
+	Kind                string    `json:"kind,omitempty"`
+	Name                string    `json:"name,omitempty"`
+	Reason              string    `json:"reason,omitempty"`
+	Type                string    `json:"type,omitempty"`
+	Message             string    `json:"message,omitempty"`
+	ReportingComponent  string    `json:"reportingComponent,omitempty"`
+	ReportingController string    `json:"reportingController,omitempty"`
+	SourceComponent     string    `json:"sourceComponent,omitempty"`
+	Count               int32     `json:"count,omitempty"`
+}
+
+type messageEventLogEntry struct {
+	Time    time.Time `json:"time"`
+	Level   string    `json:"level"`
+	Message string    `json:"message,omitempty"`
+}
+
+type eventFormatter func(event *v1.Event) any
+
+func eventLogFormatter(format string) (eventFormatter, error) {
+	switch format {
+	case "legacy":
+		return legacyEventLogEntry, nil
+	case "flat":
+		return flatEventLogEntryFor, nil
+	case "message":
+		return messageEventLogEntryFor, nil
+	default:
+		return nil, fmt.Errorf("unsupported log format %q: expected one of flat, legacy, message", format)
+	}
+}
+
+func legacyEventLogEntry(event *v1.Event) any {
+	return eventLogEntry{
+		Time:  eventTime(event),
+		Level: eventLevel(event.Type),
+		Event: event,
+	}
+}
+
+func flatEventLogEntryFor(event *v1.Event) any {
+	return flatEventLogEntry{
+		Time:                eventTime(event),
+		Level:               eventLevel(event.Type),
+		Namespace:           event.InvolvedObject.Namespace,
+		Kind:                event.InvolvedObject.Kind,
+		Name:                event.InvolvedObject.Name,
+		Reason:              event.Reason,
+		Type:                event.Type,
+		Message:             event.Message,
+		ReportingComponent:  eventReportingComponent(event),
+		ReportingController: event.ReportingController,
+		SourceComponent:     event.Source.Component,
+		Count:               event.Count,
+	}
+}
+
+func messageEventLogEntryFor(event *v1.Event) any {
+	return messageEventLogEntry{
+		Time:    eventTime(event),
+		Level:   eventLevel(event.Type),
+		Message: event.Message,
+	}
+}
+
 type leaderStatusFunc func() (bool, time.Time)
 
 type eventProcessor struct {
@@ -48,6 +117,7 @@ type eventProcessor struct {
 	logger          *log.Logger
 	detailedMetrics bool
 	metrics         eventProcessorMetrics
+	format          eventFormatter
 	marshal         func(v any) ([]byte, error)
 	now             func() time.Time
 }
@@ -276,13 +346,18 @@ func newEventProcessor(
 	logger *log.Logger,
 	detailedMetrics bool,
 	metrics eventProcessorMetrics,
+	format eventFormatter,
 ) *eventProcessor {
+	if format == nil {
+		format = flatEventLogEntryFor
+	}
 	return &eventProcessor{
 		leaderStatus:    leaderStatus,
 		excludeFilters:  excludeFilters,
 		logger:          logger,
 		detailedMetrics: detailedMetrics,
 		metrics:         metrics,
+		format:          format,
 		marshal:         json.Marshal,
 		now:             time.Now,
 	}
@@ -309,11 +384,7 @@ func (p *eventProcessor) process(obj interface{}) {
 		return
 	}
 
-	wrapper, err := p.marshal(eventLogEntry{
-		Time:  eventTime(event),
-		Level: eventLevel(event.Type),
-		Event: event,
-	})
+	wrapper, err := p.marshal(p.format(event))
 	if err != nil {
 		slog.Error("Failed to marshal event", "error", err)
 		p.metrics.eventFailed("marshal_error")
@@ -351,10 +422,15 @@ func run(ctx context.Context, args []string) error {
 	renewDeadline := fs.Duration("renew-deadline", 10*time.Second, "duration the leader has to renew the lease before losing it")
 	retryPeriod := fs.Duration("retry-period", 2*time.Second, "how often candidates retry acquiring or renewing the lease")
 	leaseName := fs.String("lease-name", "kubernetes-event-logger", "name of the leader election Lease resource")
+	logFormat := fs.String("log-format", "flat", "event JSON log format: flat, legacy, or message")
 	enableDetailedMetrics := fs.Bool("enable-detailed-metrics", false, "enable high-cardinality metrics (events by namespace, reason, and object kind)")
 	var excludeFilters eventFilters
 	fs.Var(&excludeFilters, "exclude-filter", "exclude events matching all clauses in a rule; repeatable, format: field=value[,field=value] with fields namespace,kind,name,reason,type,reporting-component,reporting-controller,source-component")
 	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	format, err := eventLogFormatter(*logFormat)
+	if err != nil {
 		return err
 	}
 
@@ -431,6 +507,7 @@ func run(ctx context.Context, args []string) error {
 		loggerEvent,
 		*enableDetailedMetrics,
 		prometheusEventProcessorMetrics{m: metrics},
+		format,
 	)
 
 	// Sync cache for all pods (leader and standby) before leader election

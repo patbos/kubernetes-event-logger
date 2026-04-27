@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"flag"
+	"fmt"
 	"log"
 	"net/http"
 	"net/http/httptest"
@@ -64,6 +65,7 @@ func newTestEventProcessor(
 		logger:          log.New(output, "", 0),
 		detailedMetrics: detailedMetrics,
 		metrics:         metrics,
+		format:          legacyEventLogEntry,
 		marshal:         json.Marshal,
 		now: func() time.Time {
 			return time.Unix(100, 0).UTC()
@@ -483,6 +485,98 @@ func TestEventProcessorPassesExpectedEntryToMarshal(t *testing.T) {
 	}
 	if len(metrics.loggedEvents) != 1 {
 		t.Fatalf("logged events = %d, want 1", len(metrics.loggedEvents))
+	}
+}
+
+func TestEventProcessorUsesConfiguredFormatter(t *testing.T) {
+	var output bytes.Buffer
+	metrics := newFakeEventProcessorMetrics()
+	leaderStart := time.Unix(100, 0).UTC()
+	eventTime := leaderStart.Add(time.Second)
+	processor := newTestEventProcessor(
+		func() (bool, time.Time) { return true, leaderStart },
+		nil,
+		false,
+		metrics,
+		&output,
+	)
+	processor.format = flatEventLogEntryFor
+
+	processor.process(&v1.Event{
+		InvolvedObject: v1.ObjectReference{
+			Namespace: "default",
+			Kind:      "Pod",
+			Name:      "pod-1",
+		},
+		Reason:              "BackOff",
+		Type:                "Warning",
+		Message:             "Back-off restarting failed container",
+		ReportingController: "kubelet",
+		Source:              v1.EventSource{Component: "node-controller"},
+		Count:               3,
+		EventTime:           metav1.MicroTime{Time: eventTime},
+	})
+
+	var entry flatEventLogEntry
+	if err := json.Unmarshal(bytes.TrimSpace(output.Bytes()), &entry); err != nil {
+		t.Fatalf("failed to unmarshal log output: %v", err)
+	}
+	if entry.Level != "warn" {
+		t.Fatalf("entry.Level = %q, want warn", entry.Level)
+	}
+	if !entry.Time.Equal(eventTime) {
+		t.Fatalf("entry.Time = %v, want %v", entry.Time, eventTime)
+	}
+	if entry.Namespace != "default" || entry.Kind != "Pod" || entry.Name != "pod-1" {
+		t.Fatalf("object fields = namespace %q kind %q name %q, want default Pod pod-1", entry.Namespace, entry.Kind, entry.Name)
+	}
+	if entry.Reason != "BackOff" || entry.Type != "Warning" {
+		t.Fatalf("event fields = reason %q type %q, want BackOff Warning", entry.Reason, entry.Type)
+	}
+	if entry.Message != "Back-off restarting failed container" {
+		t.Fatalf("entry.Message = %q, want Back-off restarting failed container", entry.Message)
+	}
+	if entry.ReportingComponent != "kubelet" || entry.ReportingController != "kubelet" || entry.SourceComponent != "node-controller" {
+		t.Fatalf("reporting fields = component %q controller %q source %q, want kubelet kubelet node-controller", entry.ReportingComponent, entry.ReportingController, entry.SourceComponent)
+	}
+	if entry.Count != 3 {
+		t.Fatalf("entry.Count = %d, want 3", entry.Count)
+	}
+}
+
+func TestEventLogFormatter(t *testing.T) {
+	event := &v1.Event{Type: "Normal", Message: "created"}
+	testCases := []struct {
+		name     string
+		format   string
+		wantType any
+	}{
+		{name: "legacy", format: "legacy", wantType: eventLogEntry{}},
+		{name: "flat", format: "flat", wantType: flatEventLogEntry{}},
+		{name: "message", format: "message", wantType: messageEventLogEntry{}},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			formatter, err := eventLogFormatter(tc.format)
+			if err != nil {
+				t.Fatalf("eventLogFormatter(%q) returned error: %v", tc.format, err)
+			}
+			got := formatter(event)
+			if fmt.Sprintf("%T", got) != fmt.Sprintf("%T", tc.wantType) {
+				t.Fatalf("formatter output type = %T, want %T", got, tc.wantType)
+			}
+		})
+	}
+}
+
+func TestEventLogFormatterRejectsUnsupportedFormat(t *testing.T) {
+	_, err := eventLogFormatter("unknown")
+	if err == nil {
+		t.Fatal("expected unsupported format error, got nil")
+	}
+	if !strings.Contains(err.Error(), "flat, legacy, message") {
+		t.Fatalf("error = %q, want supported formats", err.Error())
 	}
 }
 
@@ -2054,6 +2148,18 @@ func TestRunInvalidFlag(t *testing.T) {
 	err := run(ctx, []string{"-no-such-flag"})
 	if err == nil {
 		t.Fatal("expected error for unknown flag, got nil")
+	}
+}
+
+func TestRunInvalidLogFormat(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	err := run(ctx, []string{"-log-format=unknown"})
+	if err == nil {
+		t.Fatal("expected error for unsupported log format, got nil")
+	}
+	if !strings.Contains(err.Error(), "unsupported log format") {
+		t.Fatalf("error = %q, want unsupported log format", err.Error())
 	}
 }
 
