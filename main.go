@@ -615,7 +615,7 @@ func eventLevel(eventType string) string {
 	if strings.EqualFold(eventType, "Normal") {
 		return "info"
 	}
-	return "debug"
+	return "info"
 }
 
 func isHistorical(event *v1.Event, startTime time.Time) bool {
