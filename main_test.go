@@ -821,7 +821,7 @@ func TestHandleHealth(t *testing.T) {
 			}
 			resp := w.Body.String()
 			for _, field := range tc.expectedFields {
-				if !contains(resp, field) {
+				if !strings.Contains(resp, field) {
 					t.Errorf("response missing field: %s", field)
 				}
 			}
@@ -913,7 +913,7 @@ func TestHandleHealthLeaderTransition(t *testing.T) {
 	req := httptest.NewRequestWithContext(context.Background(), "GET", "/healthz", nil)
 	w := httptest.NewRecorder()
 	tracker.handleHealth(w, req)
-	if !contains(w.Body.String(), `"leader":false`) {
+	if !strings.Contains(w.Body.String(), `"leader":false`) {
 		t.Error("health check 1: expected non-leader")
 	}
 
@@ -924,7 +924,7 @@ func TestHandleHealthLeaderTransition(t *testing.T) {
 	req = httptest.NewRequestWithContext(context.Background(), "GET", "/healthz", nil)
 	w = httptest.NewRecorder()
 	tracker.handleHealth(w, req)
-	if !contains(w.Body.String(), `"leader":true`) {
+	if !strings.Contains(w.Body.String(), `"leader":true`) {
 		t.Error("health check 2: expected leader")
 	}
 
@@ -1772,7 +1772,7 @@ func TestEventMarshalingWithDifferentTypes(t *testing.T) {
 				t.Fatalf("failed to marshal: %v", err)
 			}
 
-			if !contains(string(bytes), tc.expected) {
+			if !strings.Contains(string(bytes), tc.expected) {
 				t.Errorf("marshaled event missing type %q", tc.expected)
 			}
 		})
@@ -1959,16 +1959,6 @@ func TestMultipleEventHandling(t *testing.T) {
 		// Historical check should work
 		isHistorical(event, baseTime)
 	}
-}
-
-// Helper function to check if a string contains a substring
-func contains(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }
 
 func TestEventLogEntryFormat(t *testing.T) {
