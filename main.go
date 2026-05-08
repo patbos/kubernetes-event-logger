@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -129,39 +130,70 @@ type eventProcessorMetrics interface {
 	observeProcessingDuration(duration time.Duration)
 }
 
-type leaderCallbackTracker struct {
-	started chan struct{}
-	done    chan struct{}
-
-	startedOnce sync.Once
-	doneOnce    sync.Once
+// leaderCallbackMetrics is the subset of metrics used by leaderCallbacks.
+// Defined as an interface so tests can substitute fakes without touching
+// the Prometheus registry.
+type leaderCallbackMetrics interface {
+	setLeaderGauge(value float64)
+	incLeaderElections()
 }
 
-func newLeaderCallbackTracker() *leaderCallbackTracker {
-	return &leaderCallbackTracker{
-		started: make(chan struct{}),
-		done:    make(chan struct{}),
+// leaderCallbacks adapts the leaderelection.LeaderCallbacks interface onto
+// the application's tracker and metrics. The methods are designed to be
+// race-free with respect to the client-go contract:
+//   - OnStartedLeading is invoked in a goroutine by client-go.
+//   - OnStoppedLeading is invoked synchronously via defer inside Run, so it
+//     always runs before RunOrDie returns.
+//   - wasLeader bridges the two: setting it from OnStartedLeading and
+//     reading it from OnStoppedLeading lets the stop path know whether the
+//     start path actually ran. atomic.Bool is used because the two
+//     callbacks may race on machines where OnStartedLeading is scheduled
+//     after OnStoppedLeading begins running.
+type leaderCallbacks struct {
+	tracker    *healthTracker
+	metrics    leaderCallbackMetrics
+	identity   string
+	now        func() time.Time
+	wasLeader  atomic.Bool
+	lastLeader string
+}
+
+func newLeaderCallbacks(tracker *healthTracker, metrics leaderCallbackMetrics, identity string) *leaderCallbacks {
+	return &leaderCallbacks{
+		tracker:  tracker,
+		metrics:  metrics,
+		identity: identity,
+		now:      func() time.Time { return time.Now().UTC() },
 	}
 }
 
-func (t *leaderCallbackTracker) markStarted() {
-	t.startedOnce.Do(func() {
-		close(t.started)
-	})
+func (c *leaderCallbacks) OnStartedLeading(_ context.Context) {
+	c.wasLeader.Store(true)
+	c.metrics.setLeaderGauge(1)
+	startTime := c.now()
+	c.tracker.setLeader(true, startTime)
+	c.metrics.incLeaderElections()
+	slog.Info("Became leader. Starting to process events.", "start_time", startTime.Format(time.RFC3339))
 }
 
-func (t *leaderCallbackTracker) markDone() {
-	t.doneOnce.Do(func() {
-		close(t.done)
-	})
-}
-
-func (t *leaderCallbackTracker) wait() {
-	select {
-	case <-t.started:
-		<-t.done
-	default:
+func (c *leaderCallbacks) OnStoppedLeading() {
+	c.metrics.setLeaderGauge(0)
+	c.tracker.setLeader(false, time.Time{})
+	if c.wasLeader.Load() {
+		slog.Info("Shutting down event processing.")
 	}
+	slog.Info("Lost leadership, entering standby mode.")
+}
+
+// OnNewLeader is invoked by client-go in a goroutine but only ever from a
+// single goroutine per LeaderElector instance, so lastLeader needs no
+// synchronization.
+func (c *leaderCallbacks) OnNewLeader(identity string) {
+	if identity == c.identity || identity == c.lastLeader {
+		return
+	}
+	c.lastLeader = identity
+	slog.Info("Standby mode.", "current_leader", identity)
 }
 
 // healthTracker tracks pod health and leader state.
@@ -338,6 +370,18 @@ func (p prometheusEventProcessorMetrics) eventFailed(reason string) {
 
 func (p prometheusEventProcessorMetrics) observeProcessingDuration(duration time.Duration) {
 	p.m.eventProcessingDuration.Observe(duration.Seconds())
+}
+
+type prometheusLeaderCallbackMetrics struct {
+	m *appMetrics
+}
+
+func (p prometheusLeaderCallbackMetrics) setLeaderGauge(value float64) {
+	p.m.leaderGauge.Set(value)
+}
+
+func (p prometheusLeaderCallbackMetrics) incLeaderElections() {
+	p.m.leaderElectionsTotal.Inc()
 }
 
 func newEventProcessor(
@@ -535,8 +579,7 @@ func run(ctx context.Context, args []string) error {
 	tracker.setCacheSynced()
 	slog.Info("Caches synced. Ready for event processing...")
 
-	callbackTracker := newLeaderCallbackTracker()
-	var lastLeader string
+	callbacks := newLeaderCallbacks(tracker, prometheusLeaderCallbackMetrics{m: metrics}, id)
 	leaderelection.RunOrDie(ctx, leaderelection.LeaderElectionConfig{
 		Lock:            lock,
 		ReleaseOnCancel: true,
@@ -544,31 +587,11 @@ func run(ctx context.Context, args []string) error {
 		RenewDeadline:   *renewDeadline,
 		RetryPeriod:     *retryPeriod,
 		Callbacks: leaderelection.LeaderCallbacks{
-			OnStartedLeading: func(ctx context.Context) {
-				callbackTracker.markStarted()
-				defer callbackTracker.markDone()
-				metrics.leaderGauge.Set(1)
-				startTime := time.Now().UTC()
-				tracker.setLeader(true, startTime)
-				metrics.leaderElectionsTotal.Inc()
-				slog.Info("Became leader. Starting to process events.", "start_time", startTime.Format(time.RFC3339))
-				<-ctx.Done()
-				slog.Info("Shutting down event processing.")
-			},
-			OnStoppedLeading: func() {
-				metrics.leaderGauge.Set(0)
-				tracker.setLeader(false, time.Time{})
-				slog.Info("Lost leadership, entering standby mode.")
-			},
-			OnNewLeader: func(identity string) {
-				if identity != id && identity != lastLeader {
-					lastLeader = identity
-					slog.Info("Standby mode.", "current_leader", identity)
-				}
-			},
+			OnStartedLeading: callbacks.OnStartedLeading,
+			OnStoppedLeading: callbacks.OnStoppedLeading,
+			OnNewLeader:      callbacks.OnNewLeader,
 		},
 	})
-	callbackTracker.wait()
 	return nil
 }
 

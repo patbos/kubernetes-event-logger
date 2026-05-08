@@ -8,10 +8,12 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -2229,43 +2231,236 @@ users:
 	}
 }
 
-func TestLeaderCallbackTrackerWaitReturnsForStandby(t *testing.T) {
-	tracker := newLeaderCallbackTracker()
-	done := make(chan struct{})
+type fakeLeaderCallbackMetrics struct {
+	mu             sync.Mutex
+	leaderGauge    float64
+	leaderGaugeSet int
+	elections      int
+}
 
-	go func() {
-		tracker.wait()
-		close(done)
-	}()
+func (m *fakeLeaderCallbackMetrics) setLeaderGauge(value float64) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.leaderGauge = value
+	m.leaderGaugeSet++
+}
 
-	select {
-	case <-done:
-	case <-time.After(100 * time.Millisecond):
-		t.Fatal("wait blocked even though leadership never started")
+func (m *fakeLeaderCallbackMetrics) incLeaderElections() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.elections++
+}
+
+func (m *fakeLeaderCallbackMetrics) snapshot() (gauge float64, gaugeSet int, elections int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.leaderGauge, m.leaderGaugeSet, m.elections
+}
+
+// captureSlog redirects slog output into a buffer for the duration of the
+// test. It restores the previous default logger on cleanup. Tests that use
+// this helper must not run with t.Parallel because slog's default logger is
+// process-global.
+func captureSlog(t *testing.T) *bytes.Buffer {
+	t.Helper()
+	prev := slog.Default()
+	var buf bytes.Buffer
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+	return &buf
+}
+
+func TestLeaderCallbacksOnStartedLeading(t *testing.T) {
+	logs := captureSlog(t)
+	tracker := newHealthTracker()
+	metrics := &fakeLeaderCallbackMetrics{}
+	fixedNow := time.Unix(1700000000, 0).UTC()
+
+	callbacks := newLeaderCallbacks(tracker, metrics, "test-id")
+	callbacks.now = func() time.Time { return fixedNow }
+
+	callbacks.OnStartedLeading(context.Background())
+
+	if !callbacks.wasLeader.Load() {
+		t.Error("wasLeader = false after OnStartedLeading, want true")
+	}
+
+	gauge, gaugeSet, elections := metrics.snapshot()
+	if gauge != 1 {
+		t.Errorf("leaderGauge = %v, want 1", gauge)
+	}
+	if gaugeSet != 1 {
+		t.Errorf("leaderGauge set %d times, want 1", gaugeSet)
+	}
+	if elections != 1 {
+		t.Errorf("leaderElections = %d, want 1", elections)
+	}
+
+	isLeader, leaderStartTime := tracker.leaderStatus()
+	if !isLeader {
+		t.Error("tracker.isLeader = false, want true")
+	}
+	if !leaderStartTime.Equal(fixedNow) {
+		t.Errorf("leaderStartTime = %v, want %v", leaderStartTime, fixedNow)
+	}
+
+	if !strings.Contains(logs.String(), `"msg":"Became leader. Starting to process events."`) {
+		t.Errorf("expected became-leader log, got: %s", logs.String())
 	}
 }
 
-func TestLeaderCallbackTrackerWaitsForLeaderCallback(t *testing.T) {
-	tracker := newLeaderCallbackTracker()
-	tracker.markStarted()
+func TestLeaderCallbacksOnStoppedLeadingAfterLeading(t *testing.T) {
+	logs := captureSlog(t)
+	tracker := newHealthTracker()
+	metrics := &fakeLeaderCallbackMetrics{}
 
-	done := make(chan struct{})
-	go func() {
-		tracker.wait()
-		close(done)
-	}()
+	callbacks := newLeaderCallbacks(tracker, metrics, "test-id")
+	callbacks.OnStartedLeading(context.Background())
+	logs.Reset()
 
-	select {
-	case <-done:
-		t.Fatal("wait returned before leader callback completed")
-	case <-time.After(10 * time.Millisecond):
+	callbacks.OnStoppedLeading()
+
+	gauge, _, _ := metrics.snapshot()
+	if gauge != 0 {
+		t.Errorf("leaderGauge = %v, want 0", gauge)
 	}
 
-	tracker.markDone()
+	isLeader, _ := tracker.leaderStatus()
+	if isLeader {
+		t.Error("tracker.isLeader = true after OnStoppedLeading, want false")
+	}
 
-	select {
-	case <-done:
-	case <-time.After(100 * time.Millisecond):
-		t.Fatal("wait did not return after leader callback completed")
+	output := logs.String()
+	if !strings.Contains(output, `"msg":"Shutting down event processing."`) {
+		t.Errorf("expected shutdown log when wasLeader=true, got: %s", output)
+	}
+	if !strings.Contains(output, `"msg":"Lost leadership, entering standby mode."`) {
+		t.Errorf("expected lost-leadership log, got: %s", output)
+	}
+}
+
+func TestLeaderCallbacksOnStoppedLeadingWithoutLeading(t *testing.T) {
+	// Standby path: OnStoppedLeading is invoked by client-go even when
+	// OnStartedLeading never ran (ctx canceled during acquire). The
+	// shutdown-event-processing log must NOT appear in this case.
+	logs := captureSlog(t)
+	tracker := newHealthTracker()
+	metrics := &fakeLeaderCallbackMetrics{}
+
+	callbacks := newLeaderCallbacks(tracker, metrics, "test-id")
+
+	callbacks.OnStoppedLeading()
+
+	gauge, gaugeSet, elections := metrics.snapshot()
+	if gauge != 0 {
+		t.Errorf("leaderGauge = %v, want 0", gauge)
+	}
+	if gaugeSet != 1 {
+		t.Errorf("leaderGauge set %d times, want 1", gaugeSet)
+	}
+	if elections != 0 {
+		t.Errorf("leaderElections = %d, want 0 (never became leader)", elections)
+	}
+
+	output := logs.String()
+	if strings.Contains(output, `"msg":"Shutting down event processing."`) {
+		t.Errorf("shutdown log should NOT appear when never became leader, got: %s", output)
+	}
+	if !strings.Contains(output, `"msg":"Lost leadership, entering standby mode."`) {
+		t.Errorf("lost-leadership log should still appear, got: %s", output)
+	}
+}
+
+func TestLeaderCallbacksFullCycle(t *testing.T) {
+	// Verifies the start-then-stop sequence as it would be invoked by
+	// client-go during a normal leadership term followed by graceful
+	// shutdown. This is the regression test for the previous racy wait()
+	// implementation: we now rely solely on the synchronous OnStoppedLeading
+	// path to emit the shutdown log, with no goroutine coordination.
+	logs := captureSlog(t)
+	tracker := newHealthTracker()
+	metrics := &fakeLeaderCallbackMetrics{}
+
+	callbacks := newLeaderCallbacks(tracker, metrics, "test-id")
+
+	callbacks.OnStartedLeading(context.Background())
+	callbacks.OnStoppedLeading()
+
+	_, _, elections := metrics.snapshot()
+	if elections != 1 {
+		t.Errorf("leaderElections = %d, want 1", elections)
+	}
+
+	output := logs.String()
+	for _, want := range []string{
+		`"msg":"Became leader. Starting to process events."`,
+		`"msg":"Shutting down event processing."`,
+		`"msg":"Lost leadership, entering standby mode."`,
+	} {
+		if !strings.Contains(output, want) {
+			t.Errorf("missing log line %q in output: %s", want, output)
+		}
+	}
+}
+
+func TestLeaderCallbacksOnNewLeader(t *testing.T) {
+	tracker := newHealthTracker()
+	metrics := &fakeLeaderCallbackMetrics{}
+
+	callbacks := newLeaderCallbacks(tracker, metrics, "self-id")
+
+	logs := captureSlog(t)
+	callbacks.OnNewLeader("self-id") // self - should not log
+	if strings.Contains(logs.String(), "Standby mode") {
+		t.Error("OnNewLeader should not log when identity matches self")
+	}
+
+	logs = captureSlog(t)
+	callbacks.OnNewLeader("peer-a")
+	if !strings.Contains(logs.String(), `"current_leader":"peer-a"`) {
+		t.Errorf("expected log for new leader peer-a, got: %s", logs.String())
+	}
+	if callbacks.lastLeader != "peer-a" {
+		t.Errorf("lastLeader = %q, want peer-a", callbacks.lastLeader)
+	}
+
+	logs = captureSlog(t)
+	callbacks.OnNewLeader("peer-a") // duplicate - should not log
+	if strings.Contains(logs.String(), "Standby mode") {
+		t.Error("OnNewLeader should not log duplicate identity")
+	}
+
+	logs = captureSlog(t)
+	callbacks.OnNewLeader("peer-b") // transition - should log
+	if !strings.Contains(logs.String(), `"current_leader":"peer-b"`) {
+		t.Errorf("expected log for new leader peer-b, got: %s", logs.String())
+	}
+}
+
+func TestLeaderCallbacksConcurrentRaceFree(t *testing.T) {
+	// Client-go invokes OnStartedLeading in a goroutine and OnStoppedLeading
+	// synchronously via defer inside Run, so the two callbacks may execute
+	// concurrently on different goroutines. wasLeader uses atomic.Bool to
+	// make that safe, and the underlying healthTracker and fake metrics
+	// have their own mutexes. This test exercises both callbacks
+	// concurrently many times to give -race a chance to catch any
+	// regression that reintroduces unsynchronized state.
+	t.Helper()
+	for i := 0; i < 100; i++ {
+		tracker := newHealthTracker()
+		metrics := &fakeLeaderCallbackMetrics{}
+		callbacks := newLeaderCallbacks(tracker, metrics, "test-id")
+
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			callbacks.OnStartedLeading(context.Background())
+		}()
+		go func() {
+			defer wg.Done()
+			callbacks.OnStoppedLeading()
+		}()
+		wg.Wait()
 	}
 }
