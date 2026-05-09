@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	v1 "k8s.io/api/core/v1"
@@ -495,9 +496,9 @@ func run(ctx context.Context, args []string) error {
 		return fmt.Errorf("failed to create kubernetes clientset: %w", err)
 	}
 
-	id, err := os.Hostname()
+	id, err := leaderElectionIdentity()
 	if err != nil {
-		return fmt.Errorf("failed to get hostname for leader election identity: %w", err)
+		return err
 	}
 
 	namespace := os.Getenv("POD_NAMESPACE")
@@ -593,6 +594,14 @@ func run(ctx context.Context, args []string) error {
 		},
 	})
 	return nil
+}
+
+func leaderElectionIdentity() (string, error) {
+	hostname, err := os.Hostname()
+	if err != nil {
+		return "", fmt.Errorf("failed to get hostname for leader election identity: %w", err)
+	}
+	return hostname + "_" + uuid.NewString(), nil
 }
 
 func eventTime(event *v1.Event) time.Time {
