@@ -73,10 +73,10 @@ func (f eventFilter) Match(event *v1.Event) bool {
 }
 
 // matchClause returns true if pattern is empty (clause not configured) or
-// pattern matches value. When pattern contains a wildcard character ("*" or
-// "?"), path.Match is used with shell-style globbing; otherwise the comparison
-// is exact. Patterns are validated at parse time so a Match-time path.Match
-// error is treated as a non-match defensively.
+// pattern matches value. When pattern contains shell-style wildcard syntax
+// ("*", "?", or character classes via "["), path.Match is used; otherwise the
+// comparison is exact. Patterns are validated at parse time so a Match-time
+// path.Match error is treated as a non-match defensively.
 func matchClause(pattern, value string) bool {
 	if pattern == "" {
 		return true

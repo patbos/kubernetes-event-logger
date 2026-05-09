@@ -205,7 +205,7 @@ Values without wildcards keep exact-match behavior. Patterns are validated at st
   -exclude-filter='reason=BackOff*'
 ```
 
-Quote wildcard patterns when invoking from a shell so the shell does not expand `*` itself. In Helm values quoting is not needed.
+Quote wildcard patterns when invoking from a shell so the shell does not expand `*` itself. In Helm values, quote patterns that start with `*` (YAML interprets a leading `*` as an alias).
 
 ### Environment Variables
 
