@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -2424,6 +2425,26 @@ func TestLeaderCallbacksOnNewLeader(t *testing.T) {
 	callbacks.OnNewLeader("peer-b") // transition - should log
 	if !strings.Contains(logs.String(), `"current_leader":"peer-b"`) {
 		t.Errorf("expected log for new leader peer-b, got: %s", logs.String())
+	}
+}
+
+func TestLeaderElectionIdentityUsesHostnameAndUUID(t *testing.T) {
+	hostname, err := os.Hostname()
+	if err != nil {
+		t.Fatalf("os.Hostname() error = %v", err)
+	}
+
+	id, err := leaderElectionIdentity()
+	if err != nil {
+		t.Fatalf("leaderElectionIdentity() error = %v", err)
+	}
+
+	prefix := hostname + "_"
+	if !strings.HasPrefix(id, prefix) {
+		t.Fatalf("leaderElectionIdentity() = %q, want prefix %q", id, prefix)
+	}
+	if _, err := uuid.Parse(strings.TrimPrefix(id, prefix)); err != nil {
+		t.Fatalf("leaderElectionIdentity() UUID suffix is invalid: %v", err)
 	}
 }
 
