@@ -195,6 +195,15 @@ tests:
           path: spec.template.spec.containers[0].args
           content: -exclude-filter=reporting-component=kubelet,source-component=scheduler
 
+  - it: should accept reportingController as alias for reportingComponent
+    set:
+      excludeFilters:
+        - reportingController: deployment-controller
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: -exclude-filter=reporting-component=deployment-controller
+
   - it: should reject unsupported exclude filter keys
     set:
       excludeFilters:
@@ -202,7 +211,7 @@ tests:
           kind: Node
     asserts:
       - failedTemplate:
-          errorMessage: 'excludeFilter: unsupported key "namspace" (supported: namespace, kind, name, reason, type, reportingComponent, sourceComponent)'
+          errorMessage: 'excludeFilter: unsupported key "namspace" (supported: namespace, kind, name, reason, type, reportingComponent, reportingController, sourceComponent)'
 
   # Env vars
   - it: should inject POD_NAMESPACE from downward API
