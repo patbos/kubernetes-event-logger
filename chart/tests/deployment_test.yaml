@@ -185,6 +185,25 @@ tests:
           path: spec.template.spec.containers[0].args
           content: -exclude-filter=namespace=kube-system,reason=Scheduled
 
+  - it: should pass exclude filter component args
+    set:
+      excludeFilters:
+        - reportingComponent: kubelet
+          sourceComponent: scheduler
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: -exclude-filter=reporting-component=kubelet,source-component=scheduler
+
+  - it: should reject unsupported exclude filter keys
+    set:
+      excludeFilters:
+        - namspace: kube-system
+          kind: Node
+    asserts:
+      - failedTemplate:
+          errorMessage: 'excludeFilter: unsupported key "namspace" (supported: namespace, kind, name, reason, type, reportingComponent, sourceComponent)'
+
   # Env vars
   - it: should inject POD_NAMESPACE from downward API
     asserts:
