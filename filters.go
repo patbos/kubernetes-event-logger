@@ -3,6 +3,7 @@ package main
 
 import (
 	"fmt"
+	"path"
 	"strings"
 
 	v1 "k8s.io/api/core/v1"
@@ -47,28 +48,51 @@ func (f eventFilters) Match(event *v1.Event) bool {
 }
 
 func (f eventFilter) Match(event *v1.Event) bool {
-	if f.Namespace != "" && event.InvolvedObject.Namespace != f.Namespace {
+	if !matchClause(f.Namespace, event.InvolvedObject.Namespace) {
 		return false
 	}
-	if f.Kind != "" && event.InvolvedObject.Kind != f.Kind {
+	if !matchClause(f.Kind, event.InvolvedObject.Kind) {
 		return false
 	}
-	if f.Name != "" && event.InvolvedObject.Name != f.Name {
+	if !matchClause(f.Name, event.InvolvedObject.Name) {
 		return false
 	}
-	if f.Reason != "" && event.Reason != f.Reason {
+	if !matchClause(f.Reason, event.Reason) {
 		return false
 	}
-	if f.Type != "" && event.Type != f.Type {
+	if !matchClause(f.Type, event.Type) {
 		return false
 	}
-	if f.ReportingComponent != "" && eventReportingComponent(event) != f.ReportingComponent {
+	if !matchClause(f.ReportingComponent, eventReportingComponent(event)) {
 		return false
 	}
-	if f.SourceComponent != "" && event.Source.Component != f.SourceComponent {
+	if !matchClause(f.SourceComponent, event.Source.Component) {
 		return false
 	}
 	return true
+}
+
+// matchClause returns true if pattern is empty (clause not configured) or
+// pattern matches value. When pattern contains a wildcard character ("*" or
+// "?"), path.Match is used with shell-style globbing; otherwise the comparison
+// is exact. Patterns are validated at parse time so a Match-time path.Match
+// error is treated as a non-match defensively.
+func matchClause(pattern, value string) bool {
+	if pattern == "" {
+		return true
+	}
+	if !hasWildcard(pattern) {
+		return pattern == value
+	}
+	ok, err := path.Match(pattern, value)
+	if err != nil {
+		return false
+	}
+	return ok
+}
+
+func hasWildcard(s string) bool {
+	return strings.ContainsAny(s, "*?[")
 }
 
 func (f eventFilter) String() string {
@@ -115,6 +139,12 @@ func parseEventFilter(input string) (eventFilter, error) {
 		value = strings.TrimSpace(value)
 		if key == "" || value == "" {
 			return eventFilter{}, fmt.Errorf("invalid filter clause %q: key and value must be non-empty", clause)
+		}
+
+		if hasWildcard(value) {
+			if _, err := path.Match(value, ""); err != nil {
+				return eventFilter{}, fmt.Errorf("invalid filter clause %q: malformed pattern: %w", clause, err)
+			}
 		}
 
 		switch key {

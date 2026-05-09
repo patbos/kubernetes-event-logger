@@ -189,6 +189,24 @@ Example:
 
 Each filter rule is AND-matched internally, and the full rule set is OR-matched across rules.
 
+#### Wildcard matching
+
+Filter values support shell-style wildcards using [Go's `path.Match`](https://pkg.go.dev/path#Match) syntax:
+
+- `*` matches any run of non-separator characters
+- `?` matches a single non-separator character
+- `[abc]` and `[a-z]` character classes are supported
+
+Values without wildcards keep exact-match behavior. Patterns are validated at startup and a malformed pattern (for example an unclosed `[`) makes the binary exit with a clear error.
+
+```bash
+./kubernetes-event-logger \
+  -exclude-filter='namespace=kube-*' \
+  -exclude-filter='reason=BackOff*'
+```
+
+Quote wildcard patterns when invoking from a shell so the shell does not expand `*` itself. In Helm values quoting is not needed.
+
 ### Environment Variables
 
 | Variable | Description | Default |
