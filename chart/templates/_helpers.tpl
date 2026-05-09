@@ -87,7 +87,7 @@ so the rendered image remains easy to read while the digest pins the actual cont
 {{- end }}
 
 {{- define "kubernetes-event-logger.excludeFilter" -}}
-{{- $supported := list "namespace" "kind" "name" "reason" "type" "reportingComponent" "sourceComponent" -}}
+{{- $supported := list "namespace" "kind" "name" "reason" "type" "reportingComponent" "reportingController" "sourceComponent" -}}
 {{- range $key, $_ := . -}}
 {{- if not (has $key $supported) -}}
 {{- fail (printf "excludeFilter: unsupported key %q (supported: %s)" $key (join ", " $supported)) -}}
@@ -110,6 +110,9 @@ so the rendered image remains easy to read while the digest pins the actual cont
 {{- $parts = append $parts (printf "type=%s" .) -}}
 {{- end -}}
 {{- with .reportingComponent -}}
+{{- $parts = append $parts (printf "reporting-component=%s" .) -}}
+{{- end -}}
+{{- with .reportingController -}}
 {{- $parts = append $parts (printf "reporting-component=%s" .) -}}
 {{- end -}}
 {{- with .sourceComponent -}}

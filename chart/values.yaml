@@ -135,7 +135,8 @@ enableDetailedMetrics: false
 
 # List of event exclusion rules.
 # Each rule excludes events only when all configured fields match.
-# Supported fields: namespace, kind, name, reason, type, reporting-component, reporting-controller, source-component
+# Supported keys: namespace, kind, name, reason, type, reportingComponent, reportingController, sourceComponent
+# reportingController is an alias for reportingComponent (matches the Go CLI alias).
 # Example:
 #   - kind: Node
 #     type: Normal
