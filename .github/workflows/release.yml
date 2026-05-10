@@ -6,6 +6,7 @@ on:
       - "v*"
 
 permissions:
+  checks: read
   contents: write
   packages: write
   id-token: write
@@ -31,6 +32,26 @@ jobs:
           VERSION=${GITHUB_REF_NAME#v}
           echo "VERSION=$VERSION" >> "$GITHUB_OUTPUT"
           echo "TAG=$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Verify tag commit is on main
+        run: |
+          git fetch --no-tags origin main:refs/remotes/origin/main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "Release tag ${GITHUB_REF_NAME} points to ${GITHUB_SHA}, which is not reachable from origin/main."
+            exit 1
+          fi
+
+      - name: Verify CI passed for release commit
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          successful_verify_runs=$(gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/check-runs" \
+            --jq '.check_runs | map(select(.name == "verify" and .conclusion == "success")) | length')
+
+          if [ "$successful_verify_runs" -eq 0 ]; then
+            echo "No successful CI verify check was found for ${GITHUB_SHA}."
+            exit 1
+          fi
 
       - name: Update Chart.yaml
         run: |
