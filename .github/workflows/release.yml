@@ -23,6 +23,12 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Validate release source
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin main:refs/remotes/origin/main
+          scripts/validate-release-source.sh "$GITHUB_REF_NAME" origin/main
+
       - name: Extract version from tag
         id: version
         run: |
