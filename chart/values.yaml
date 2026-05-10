@@ -165,9 +165,8 @@ serviceMonitor:
   labels: {}
   relabelings: []
 
-# Network Policy: restrict traffic to/from the pod
-# Prevents lateral movement if pod is compromised
-# Requires cluster with network policy support (Calico, Cilium, etc)
+# Network Policy: restrict traffic to/from the pod.
+# Requires cluster with network policy support (Calico, Cilium, etc).
 # RECOMMENDATION: Enable in production clusters with network policy support for defense-in-depth
 networkPolicy:
   enabled: false
@@ -179,11 +178,11 @@ networkPolicy:
       namespaceSelector:
         matchLabels:
           name: prometheus
-  # Egress: allow DNS and Kubernetes API access
+  # Egress: allow DNS and HTTPS to namespaces matching the built-in kube-system selector.
   egress:
     # Allow DNS queries (port 53 UDP)
     dns:
       enabled: true
-    # Allow Kubernetes API access (port 443 TCP to kube-system)
+    # Allow HTTPS egress (port 443 TCP) to namespaces matching the selector below.
     kubernetesAPI:
       enabled: true

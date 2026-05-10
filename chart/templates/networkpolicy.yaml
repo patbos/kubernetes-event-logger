@@ -25,7 +25,7 @@ spec:
       port: {{ .Values.metricsPort.containerPort }}
   {{- end }}
 
-  # Egress: Allow DNS queries and Kubernetes API access
+  # Egress: Allow DNS queries and HTTPS to kube-system namespaces
   egress:
   {{- if .Values.networkPolicy.egress.dns.enabled }}
   # Allow DNS (UDP port 53) to any destination
@@ -37,7 +37,7 @@ spec:
   {{- end }}
 
   {{- if .Values.networkPolicy.egress.kubernetesAPI.enabled }}
-  # Allow HTTPS (TCP port 443) to kube-system namespace (API server)
+  # Allow HTTPS (TCP port 443) to namespaces labeled name=kube-system
   - to:
     - namespaceSelector:
         matchLabels:
