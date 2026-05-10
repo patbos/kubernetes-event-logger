@@ -46,8 +46,9 @@ tests:
       - isNotNull:
           path: spec.egress
       - equal:
-          path: spec.egress[0].to[0].namespaceSelector.matchLabels.kubernetes\.io/metadata\.name
-          value: kube-system
+          path: spec.egress[0].to[0].namespaceSelector.matchLabels
+          value:
+            kubernetes.io/metadata.name: kube-system
       - equal:
           path: spec.egress[0].to[0].podSelector.matchLabels.k8s-app
           value: kube-dns
