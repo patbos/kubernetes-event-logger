@@ -7,9 +7,9 @@ metadata:
 spec:
   type: ClusterIP
   ports:
-    - port: {{ .Values.port.containerPort }}
-      targetPort: {{ .Values.port.name }}
+    - port: {{ .Values.metricsPort.containerPort }}
+      targetPort: {{ .Values.metricsPort.name }}
       protocol: TCP
-      name: {{ .Values.port.name }}
+      name: {{ .Values.metricsPort.name }}
   selector:
     {{- include "kubernetes-event-logger.selectorLabels" . | nindent 4 }}

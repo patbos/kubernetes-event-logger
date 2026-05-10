@@ -36,7 +36,7 @@ tests:
           path: spec.ingress
       - equal:
           path: spec.ingress[0].ports[0].port
-          value: 8080
+          value: 9090
 
   - it: should allow DNS egress when enabled
     set:

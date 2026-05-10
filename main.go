@@ -467,6 +467,8 @@ func run(ctx context.Context, args []string) error {
 	renewDeadline := fs.Duration("renew-deadline", 10*time.Second, "duration the leader has to renew the lease before losing it")
 	retryPeriod := fs.Duration("retry-period", 2*time.Second, "how often candidates retry acquiring or renewing the lease")
 	leaseName := fs.String("lease-name", "kubernetes-event-logger", "name of the leader election Lease resource")
+	healthAddr := fs.String("health-addr", ":8080", "address for HTTP health endpoints")
+	metricsAddr := fs.String("metrics-addr", ":9090", "address for Prometheus metrics endpoint")
 	logFormat := fs.String("log-format", "flat", "event JSON log format: flat, legacy, or message")
 	enableDetailedMetrics := fs.Bool("enable-detailed-metrics", false, "enable high-cardinality metrics (events by namespace, reason, and object kind)")
 	var excludeFilters eventFilters
@@ -521,27 +523,44 @@ func run(ctx context.Context, args []string) error {
 	metrics := newAppMetrics(reg, *enableDetailedMetrics)
 	tracker := newHealthTracker()
 
-	mux := http.NewServeMux()
-	mux.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
-	mux.HandleFunc("/healthz", tracker.handleHealth)
-	mux.HandleFunc("/readyz", tracker.handleHealth)
-	srv := &http.Server{
-		Addr:              ":8080",
-		Handler:           mux,
+	healthMux := http.NewServeMux()
+	healthMux.HandleFunc("/healthz", tracker.handleHealth)
+	healthMux.HandleFunc("/readyz", tracker.handleHealth)
+	healthSrv := &http.Server{
+		Addr:              *healthAddr,
+		Handler:           healthMux,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      10 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
 	go func() {
-		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		if err := healthSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			slog.Error("health server failed", "error", err)
+		}
+	}()
+	metricsMux := http.NewServeMux()
+	metricsMux.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
+	metricsSrv := &http.Server{
+		Addr:              *metricsAddr,
+		Handler:           metricsMux,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       10 * time.Second,
+		WriteTimeout:      10 * time.Second,
+		IdleTimeout:       60 * time.Second,
+	}
+	go func() {
+		if err := metricsSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			slog.Error("metrics server failed", "error", err)
 		}
 	}()
 	defer func() {
 		shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
-		if err := srv.Shutdown(shutdownCtx); err != nil {
+		if err := healthSrv.Shutdown(shutdownCtx); err != nil {
+			slog.Error("health server shutdown error", "error", err)
+		}
+		if err := metricsSrv.Shutdown(shutdownCtx); err != nil {
 			slog.Error("metrics server shutdown error", "error", err)
 		}
 	}()
