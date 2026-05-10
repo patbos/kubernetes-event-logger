@@ -1,0 +1,65 @@
+name: Install helm-unittest
+description: Install helm-unittest after verifying release signatures
+
+inputs:
+  version:
+    description: helm-unittest version to install
+    required: false
+    default: 1.1.0
+  signing-key-fingerprint:
+    description: Expected PGP fingerprint for the helm-unittest signing key
+    required: false
+    default: 853008CD0B0A5A2DA04FF8A5616AD47F65B54AC7
+
+runs:
+  using: composite
+  steps:
+    - name: Install helm-unittest plugin (signature verified)
+      shell: bash
+      env:
+        HELM_UNITTEST_VERSION: ${{ inputs.version }}
+        # Public PGP fingerprint of the upstream helm-unittest signing key.
+        # Pinned here so a swap of .github/keys/helm-unittest-public-key.asc fails CI.
+        HELM_UNITTEST_KEY_FPR: ${{ inputs.signing-key-fingerprint }}
+      run: |
+        set -euo pipefail
+
+        workdir="$(mktemp -d)"
+        tgz="${workdir}/unittest-${HELM_UNITTEST_VERSION}.tgz"
+        base="https://github.com/helm-unittest/helm-unittest/releases/download/v${HELM_UNITTEST_VERSION}"
+
+        # Tarball, detached signature, helm provenance file, and the
+        # provenance's detached signature.
+        curl -fsSL --retry 3 -o "$tgz"        "${base}/unittest-${HELM_UNITTEST_VERSION}.tgz"
+        curl -fsSL --retry 3 -o "$tgz.asc"    "${base}/unittest-${HELM_UNITTEST_VERSION}.tgz.asc"
+        curl -fsSL --retry 3 -o "$tgz.prov"   "${base}/unittest-${HELM_UNITTEST_VERSION}.tgz.prov"
+        curl -fsSL --retry 3 -o "$tgz.prov.asc" "${base}/unittest-${HELM_UNITTEST_VERSION}.tgz.prov.asc"
+
+        # Import the upstream signing key into an isolated, ephemeral
+        # GNUPGHOME and assert the fingerprint matches the pinned value
+        # before trusting any signature.
+        export GNUPGHOME="${workdir}/gnupg"
+        mkdir -p "$GNUPGHOME"
+        chmod 700 "$GNUPGHOME"
+        gpg --batch --import .github/keys/helm-unittest-public-key.asc
+
+        imported_fpr="$(gpg --batch --with-colons --fingerprint --import-options show-only --import \
+          .github/keys/helm-unittest-public-key.asc \
+          | awk -F: '/^fpr:/ {print $10; exit}')"
+        if [ "$imported_fpr" != "$HELM_UNITTEST_KEY_FPR" ]; then
+          echo "Imported helm-unittest key fingerprint $imported_fpr does not match expected $HELM_UNITTEST_KEY_FPR" >&2
+          exit 1
+        fi
+
+        # Direct integrity check on the tarball (independent of helm).
+        gpg --batch --verify "$tgz.asc"      "$tgz"
+        # Provenance file is what helm itself will re-verify below.
+        gpg --batch --verify "$tgz.prov.asc" "$tgz.prov"
+
+        # Helm 4 verifies plugin tarballs against a legacy GnuPG keyring
+        # using the .prov file. Export our verified key into that format
+        # and pass it explicitly via --keyring.
+        pubring="${workdir}/pubring.gpg"
+        gpg --batch --export "$HELM_UNITTEST_KEY_FPR" > "$pubring"
+
+        helm plugin install "$tgz" --keyring "$pubring"

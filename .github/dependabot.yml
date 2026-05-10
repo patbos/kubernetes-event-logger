@@ -23,8 +23,9 @@ updates:
 
   # GitHub Actions version updates
   - package-ecosystem: github-actions
-    directory: /
+    directories:
+      - /
+      - /.github/actions/install-helm-unittest
     schedule:
       interval: daily
     open-pull-requests-limit: 5
-
