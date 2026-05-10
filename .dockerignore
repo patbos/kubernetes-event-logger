@@ -15,6 +15,4 @@ Makefile
 .gitleaks.toml
 .golangci.yml
 
-*_test.go
-
 kubernetes-event-logger
