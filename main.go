@@ -470,7 +470,7 @@ func run(ctx context.Context, args []string) error {
 	logFormat := fs.String("log-format", "flat", "event JSON log format: flat, legacy, or message")
 	enableDetailedMetrics := fs.Bool("enable-detailed-metrics", false, "enable high-cardinality metrics (events by namespace, reason, and object kind)")
 	var excludeFilters eventFilters
-	fs.Var(&excludeFilters, "exclude-filter", "exclude events matching all clauses in a rule; repeatable, format: field=value[,field=value] with fields namespace,kind,name,reason,type,reporting-component,reporting-controller,source-component")
+	fs.Var(&excludeFilters, "exclude-filter", "exclude events matching all clauses in a rule; repeatable, format: field=value[,field=value] with fields namespace,kind,name,reason,type,reporting-component,reporting-controller,source-component. Values support shell-style wildcards (e.g. namespace=kube-*); patterns use Go path.Match syntax")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}

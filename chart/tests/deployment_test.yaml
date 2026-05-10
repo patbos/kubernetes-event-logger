@@ -204,6 +204,16 @@ tests:
           path: spec.template.spec.containers[0].args
           content: -exclude-filter=reporting-component=deployment-controller
 
+  - it: should pass wildcard exclude filter values through unchanged
+    set:
+      excludeFilters:
+        - namespace: kube-*
+          reason: BackOff*
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: -exclude-filter=namespace=kube-*,reason=BackOff*
+
   - it: should reject unsupported exclude filter keys
     set:
       excludeFilters:

@@ -95,3 +95,83 @@ func TestEventReportingComponentFallbacksToSourceComponent(t *testing.T) {
 		t.Fatalf("eventReportingComponent = %q, want kubelet", got)
 	}
 }
+
+func TestParseEventFilterRejectsMalformedWildcardPattern(t *testing.T) {
+	if _, err := parseEventFilter("namespace=kube-[abc"); err == nil {
+		t.Fatal("parseEventFilter returned nil error for malformed pattern")
+	}
+}
+
+func TestEventFilterWildcardMatch(t *testing.T) {
+	testCases := []struct {
+		name   string
+		filter eventFilter
+		event  *v1.Event
+		want   bool
+	}{
+		{
+			name:   "namespace prefix matches",
+			filter: eventFilter{Namespace: "kube-*"},
+			event:  &v1.Event{InvolvedObject: v1.ObjectReference{Namespace: "kube-system"}},
+			want:   true,
+		},
+		{
+			name:   "namespace prefix does not match unrelated namespace",
+			filter: eventFilter{Namespace: "kube-*"},
+			event:  &v1.Event{InvolvedObject: v1.ObjectReference{Namespace: "default"}},
+			want:   false,
+		},
+		{
+			name:   "reason wildcard matches BackOff variants",
+			filter: eventFilter{Reason: "BackOff*"},
+			event:  &v1.Event{Reason: "BackOffStart"},
+			want:   true,
+		},
+		{
+			name:   "wildcard does not match across slashes",
+			filter: eventFilter{Name: "frontend-*"},
+			event:  &v1.Event{InvolvedObject: v1.ObjectReference{Name: "frontend-team/api"}},
+			want:   false,
+		},
+		{
+			name:   "exact match still works without wildcard",
+			filter: eventFilter{Type: "Normal"},
+			event:  &v1.Event{Type: "Normal"},
+			want:   true,
+		},
+		{
+			name: "mixed wildcard and exact clauses match",
+			filter: eventFilter{
+				Namespace: "kube-*",
+				Kind:      "Pod",
+				Reason:    "BackOff*",
+			},
+			event: &v1.Event{
+				InvolvedObject: v1.ObjectReference{Namespace: "kube-system", Kind: "Pod"},
+				Reason:         "BackOffStart",
+			},
+			want: true,
+		},
+		{
+			name: "mixed wildcard and exact clauses with one mismatch",
+			filter: eventFilter{
+				Namespace: "kube-*",
+				Kind:      "Pod",
+				Reason:    "BackOff*",
+			},
+			event: &v1.Event{
+				InvolvedObject: v1.ObjectReference{Namespace: "kube-system", Kind: "Node"},
+				Reason:         "BackOffStart",
+			},
+			want: false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.filter.Match(tc.event); got != tc.want {
+				t.Fatalf("Match = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}

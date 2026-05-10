@@ -137,11 +137,15 @@ enableDetailedMetrics: false
 # Each rule excludes events only when all configured fields match.
 # Supported keys: namespace, kind, name, reason, type, reportingComponent, reportingController, sourceComponent
 # reportingController is an alias for reportingComponent (matches the Go CLI alias).
+# Values support shell-style wildcards using Go path.Match syntax (* ? [abc]).
+# Patterns are validated at startup; malformed patterns make the pod fail.
 # Example:
 #   - kind: Node
 #     type: Normal
 #   - namespace: kube-system
 #     reason: Scheduled
+#   - namespace: kube-*       # wildcard match
+#   - reason: BackOff*        # wildcard match
 excludeFilters: []
 
 # Pod Disruption Budget prevents voluntary disruptions from affecting availability.
