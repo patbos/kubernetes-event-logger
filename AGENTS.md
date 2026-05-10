@@ -4,20 +4,24 @@
 This repository is intentionally small. `main.go` contains the application entrypoint, Kubernetes event watcher, leader election, HTTP health and metrics endpoints, and Prometheus metrics setup. Event filter parsing and matching live in `filters.go`, with unit coverage in `filters_test.go`. Go module metadata lives in `go.mod` and `go.sum`. The Helm chart is under `chart/` with templates in `chart/templates/`. Release automation is defined in `.github/workflows/`.
 
 ## Build, Test, and Development Commands
-- `go test ./...`: run the Go test suite, including the event filter parsing and matching tests.
+- `go test ./...`: run the Go test suite, including event filtering, timestamp, health, metrics, and helper tests.
 - `golangci-lint run ./...`: run static analysis and security linting (checks for unchecked errors, unused code, security patterns, code quality).
 - `go build -o kubernetes-event-logger .`: build the local binary used in the README examples.
 - `./kubernetes-event-logger -kubeconfig=/path/to/config`: run the logger against a cluster from your workstation.
 - `./kubernetes-event-logger -exclude-filter=kind=Node,type=Normal`: run locally with an exclusion rule to validate filter behavior.
 - `docker build -t kubernetes-event-logger .`: build the container image from the multi-stage `Dockerfile`.
 - `helm lint chart`: validate Helm chart structure before opening a PR.
-- `helm unittest chart`: run the Helm chart unit test suite (requires the `helm-unittest` plugin: `helm plugin install https://github.com/helm-unittest/helm-unittest`). Tests live in `chart/tests/*_test.yaml` and cover template rendering, security contexts, resource limits, and optional features. Runs automatically in GitHub Actions CI on chart changes.
+- `helm unittest chart`: run the Helm chart unit test suite (requires the `helm-unittest` plugin: `helm plugin install https://github.com/helm-unittest/helm-unittest`). Tests live in `chart/tests/*_test.yaml` and cover template rendering, security contexts, resource limits, RBAC, probes, and optional features. Runs automatically in GitHub Actions CI.
 
 ## Testing & CI/CD
-All chart changes trigger automated validation via GitHub Actions (`.github/workflows/ci.yml`):
-- Go formatting and unit tests
+Pull requests, pushes to `main`, and manual runs trigger automated validation via GitHub Actions (`.github/workflows/ci.yml`):
+- Secret scanning
+- Go formatting, linting, and unit tests
+- Dockerfile linting
 - Helm lint validation
 - Helm chart unit tests (`helm unittest chart`)
+
+Relevant pull requests also trigger `.github/workflows/build-pr.yml`, which builds a local image and scans it with Trivy without publishing it.
 
 Tests must pass before merging to `main`. Run locally before opening PRs to catch issues early.
 

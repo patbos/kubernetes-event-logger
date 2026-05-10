@@ -144,16 +144,17 @@ helm install kubernetes-event-logger oci://ghcr.io/patbos/kubernetes-event-logge
 
 ### Authentication
 
-The binary first tries the supplied kubeconfig path. If that fails, it falls back to in-cluster configuration.
+The binary uses a kubeconfig when `-kubeconfig` is non-empty. If `-kubeconfig` is empty, it uses in-cluster configuration.
 
-- Default `-kubeconfig`: `~/.kube/config` when the file exists; otherwise falls back to in-cluster config
+- Default `-kubeconfig`: `~/.kube/config` when that file exists; otherwise empty
+- An invalid kubeconfig path or unreadable kubeconfig is fatal; the process does not retry with in-cluster configuration after kubeconfig loading fails
 - In Kubernetes, set `POD_NAMESPACE` from `metadata.namespace` so leader election uses the correct namespace
 
 ### Command-line Flags
 
 | Flag | Description | Default |
 |---|---|---|
-| `-kubeconfig` | Path to kubeconfig file; falls back to in-cluster config when not set | `~/.kube/config` if it exists, otherwise empty |
+| `-kubeconfig` | Path to kubeconfig file; uses in-cluster config only when empty | `~/.kube/config` if it exists, otherwise empty |
 | `-lease-name` | Name of the leader election Lease resource | `kubernetes-event-logger` |
 | `-lease-duration` | Duration a leader lease remains valid | `15s` |
 | `-renew-deadline` | Time the leader has to renew the lease | `10s` |
@@ -237,7 +238,7 @@ Common chart values:
 | `leaderElection.renewDeadline` | Lease renew deadline | `10s` |
 | `leaderElection.retryPeriod` | Lease retry interval | `2s` |
 | `serviceMonitor.enabled` | Create a Prometheus Operator `ServiceMonitor` | `false` |
-| `networkPolicy.enabled` | Create a `NetworkPolicy` for metrics ingress and DNS/API egress | `false` |
+| `networkPolicy.enabled` | Create a `NetworkPolicy` for metrics ingress plus configured DNS and kube-system HTTPS egress | `false` |
 | `podDisruptionBudget.enabled` | Create a PodDisruptionBudget | `true` |
 | `podDisruptionBudget.minAvailable` | Minimum available pods during voluntary disruptions | `1` |
 | `resources` | Pod resource requests and limits | see [`chart/values.yaml`](chart/values.yaml) |
@@ -257,9 +258,9 @@ Leader election is always used. Only the current leader processes and logs event
 
 The leader election `Lease`:
 
-- is named `kubernetes-event-logger`
+- is named by `-lease-name`; the chart sets this to the release fullname
 - lives in the namespace from `POD_NAMESPACE`
-- uses the pod hostname as the holder identity
+- uses `<hostname>_<uuid>` as the holder identity
 
 During failover or rollout, some events can be logged twice. Downstream consumers should treat the stream as at-least-once.
 
@@ -333,7 +334,7 @@ Each log line is a JSON object. The default `-log-format=flat` emits selected ev
 `-log-format=legacy` emits the previous envelope with:
 
 - `time`: event timestamp chosen from `eventTime`, `series.lastObservedTime`, `lastTimestamp`, or `firstTimestamp` (in that order)
-- `level`: derived from event type (`Warning` -> `warn`, `Normal` -> `info`, other values -> `debug`)
+- `level`: derived from event type (`Warning` -> `warn`, `Normal` -> `info`, other values -> `info`)
 - `event`: the original Kubernetes event object
 
 `-log-format=message` emits only `time`, `level`, and `message`.
@@ -409,7 +410,7 @@ chmod +x /usr/local/bin/hadolint
 make all
 ```
 
-This runs formatting check, lint, Go tests, Helm lint, and Helm unit tests — matching what CI runs on every push.
+This runs formatting check, lint, Go tests, Helm lint, and Helm unit tests. CI also runs secret scanning and Dockerfile linting.
 
 Individual targets:
 
@@ -477,4 +478,4 @@ The Docker image uses a multi-stage build and a distroless runtime image.
 
 ## Publishing
 
-GitHub Actions publishes multi-architecture container images to GitHub Container Registry (`ghcr.io`) on pushes to `main`, version tags matching `v*`, and manual workflow runs.
+GitHub Actions publishes multi-architecture container images and OCI Helm charts to GitHub Container Registry (`ghcr.io`) when version tags matching `v*` are pushed. CI runs on pull requests, pushes to `main`, and manual workflow dispatches; the separate PR image workflow builds and scans a local image for relevant pull requests but does not publish it.
