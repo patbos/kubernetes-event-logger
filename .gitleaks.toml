@@ -10,8 +10,13 @@ useDefault = true
 # hex public fingerprint is, by definition, public; gitleaks' generic-api-key
 # rule classifies any 40-hex run as high entropy, so allowlist this exact
 # value (in any file in the repo).
-[[allowlists]]
+#
+# Top-level [allowlist] (singular) is the schema supported by gitleaks 8.x
+# from at least 8.18 onwards, including the 8.24.3 used by gitleaks-action
+# v2.3.9.
+[allowlist]
 description = "helm-unittest signing key fingerprint (public, not a secret)"
 regexes = [
   '''853008CD0B0A5A2DA04FF8A5616AD47F65B54AC7''',
 ]
+regexTarget = "match"
