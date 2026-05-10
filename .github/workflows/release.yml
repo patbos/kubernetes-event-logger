@@ -185,10 +185,34 @@ jobs:
 
       - name: Push Helm chart to GHCR
         if: github.event_name != 'workflow_dispatch'
+        id: chart_push
         run: |
           REPO="${GITHUB_REPOSITORY,,}"
-          helm push kubernetes-event-logger-${{ steps.version.outputs.VERSION }}.tgz \
-            oci://${{ env.REGISTRY }}/${REPO%/*}
+          CHART_OCI_REPO="oci://${{ env.REGISTRY }}/${REPO%/*}"
+          CHART_TGZ="kubernetes-event-logger-${{ steps.version.outputs.VERSION }}.tgz"
+          PUSH_LOG="$(mktemp)"
+
+          helm push "$CHART_TGZ" "$CHART_OCI_REPO" 2>&1 | tee "$PUSH_LOG"
+
+          CHART_PUSHED_REF=$(awk '/^Pushed:/ {print $2}' "$PUSH_LOG")
+          CHART_DIGEST=$(awk '/^Digest:/ {print $2}' "$PUSH_LOG")
+
+          if [ -z "$CHART_PUSHED_REF" ] || [ -z "$CHART_DIGEST" ]; then
+            echo "Failed to parse chart push output for digest." >&2
+            exit 1
+          fi
+
+          CHART_BARE_REF="${CHART_PUSHED_REF%:*}"
+          CHART_OCI_DIGEST_REF="${CHART_BARE_REF}@${CHART_DIGEST}"
+
+          echo "ref=${CHART_OCI_DIGEST_REF}" >> "$GITHUB_OUTPUT"
+          echo "digest=${CHART_DIGEST}" >> "$GITHUB_OUTPUT"
+
+      - name: Sign Helm chart
+        if: github.event_name != 'workflow_dispatch'
+        env:
+          CHART_REF: ${{ steps.chart_push.outputs.ref }}
+        run: cosign sign --yes "$CHART_REF"
 
       - name: Create GitHub Release
         if: github.event_name != 'workflow_dispatch'
