@@ -55,8 +55,17 @@ jobs:
       - name: Lint Helm chart
         run: helm lint chart
 
+      - name: Import helm-unittest public key
+        run: |
+          gpg --import .github/keys/helm-unittest-public-key.asc
+          mkdir -p ~/.gnupg
+          gpg --export > ~/.gnupg/pubring.gpg
+
       - name: Install helm-unittest plugin
-        run: helm plugin install https://github.com/helm-unittest/helm-unittest --verify=false
+        env:
+          HELM_UNITTEST_VERSION: 1.1.0
+        run: |
+          helm plugin install "https://github.com/helm-unittest/helm-unittest/releases/download/v${HELM_UNITTEST_VERSION}/unittest-${HELM_UNITTEST_VERSION}.tgz"
 
       - name: Test Helm chart
         run: helm unittest chart
