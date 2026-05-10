@@ -13,8 +13,6 @@ on:
 
 permissions:
   contents: read
-  pull-requests: write
-  security-events: write
 
 jobs:
   build:
@@ -23,6 +21,8 @@ jobs:
     steps:
       - name: Check out source
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
 
       - name: Set up Go
         uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c  # 4b73464bb391d4059bd26b0524d20df3927bd417
@@ -81,23 +81,6 @@ jobs:
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25  # master
         with:
           input: /tmp/image.tar
-          format: sarif
-          output: trivy-results.sarif
+          format: table
+          exit-code: "1"
           severity: CRITICAL,HIGH
-
-      - name: Upload Trivy results to GitHub Security
-        uses: github/codeql-action/upload-sarif@68bde559dea0fdcac2102bfdf6230c5f70eb485e  # v4.35.4
-        if: always()
-        with:
-          sarif_file: trivy-results.sarif
-
-      - name: Comment on PR
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3  # v9.0.0
-        with:
-          script: |
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: `✅ **Build & Security Scan Complete**\n\n- Go formatting: OK\n- golangci-lint: OK\n- Unit tests: OK\n- Helm lint: OK\n- Helm unittest: OK\n- Trivy scan: OK\n\nSee [Security tab](https://github.com/${{ github.repository }}/security/code-scanning) for vulnerability details.`
-            })
