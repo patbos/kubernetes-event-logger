@@ -55,17 +55,39 @@ jobs:
       - name: Lint Helm chart
         run: helm lint chart
 
-      - name: Import helm-unittest public key
-        run: |
-          gpg --import .github/keys/helm-unittest-public-key.asc
-          mkdir -p ~/.gnupg
-          gpg --export > ~/.gnupg/pubring.gpg
-
-      - name: Install helm-unittest plugin
+      - name: Install helm-unittest plugin (signature verified)
         env:
           HELM_UNITTEST_VERSION: 1.1.0
+          HELM_UNITTEST_KEY_FPR: 853008CD0B0A5A2DA04FF8A5616AD47F65B54AC7
         run: |
-          helm plugin install "https://github.com/helm-unittest/helm-unittest/releases/download/v${HELM_UNITTEST_VERSION}/unittest-${HELM_UNITTEST_VERSION}.tgz"
+          set -euo pipefail
+
+          workdir="$(mktemp -d)"
+          tgz="${workdir}/unittest-${HELM_UNITTEST_VERSION}.tgz"
+          sig="${tgz}.asc"
+          base="https://github.com/helm-unittest/helm-unittest/releases/download/v${HELM_UNITTEST_VERSION}"
+
+          curl -fsSL --retry 3 -o "$tgz" "${base}/unittest-${HELM_UNITTEST_VERSION}.tgz"
+          curl -fsSL --retry 3 -o "$sig" "${base}/unittest-${HELM_UNITTEST_VERSION}.tgz.asc"
+
+          # Import upstream signing key into a clean, ephemeral keyring and
+          # confirm the fingerprint matches the expected pin before trusting it.
+          export GNUPGHOME="${workdir}/gnupg"
+          mkdir -p "$GNUPGHOME"
+          chmod 700 "$GNUPGHOME"
+          gpg --batch --import .github/keys/helm-unittest-public-key.asc
+
+          imported_fpr="$(gpg --batch --with-colons --fingerprint --import-options show-only --import \
+            .github/keys/helm-unittest-public-key.asc \
+            | awk -F: '/^fpr:/ {print $10; exit}')"
+          if [ "$imported_fpr" != "$HELM_UNITTEST_KEY_FPR" ]; then
+            echo "Imported helm-unittest key fingerprint $imported_fpr does not match expected $HELM_UNITTEST_KEY_FPR" >&2
+            exit 1
+          fi
+
+          gpg --batch --verify "$sig" "$tgz"
+
+          helm plugin install "$tgz"
 
       - name: Test Helm chart
         run: helm unittest chart
