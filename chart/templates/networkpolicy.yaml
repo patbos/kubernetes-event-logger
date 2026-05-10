@@ -25,14 +25,19 @@ spec:
       port: {{ .Values.metricsPort.containerPort }}
   {{- end }}
 
-  # Egress: Allow DNS queries and HTTPS to kube-system namespaces
+  # Egress: Allow Kubernetes API access and optional DNS queries
   egress:
   {{- if .Values.networkPolicy.egress.dns.enabled }}
-  # Allow DNS (UDP port 53) to any destination
+  # Allow DNS to the configured DNS pods
   - to:
-    - namespaceSelector: {}
+    - namespaceSelector:
+        {{- toYaml .Values.networkPolicy.egress.dns.namespaceSelector | nindent 8 }}
+      podSelector:
+        {{- toYaml .Values.networkPolicy.egress.dns.podSelector | nindent 8 }}
     ports:
     - protocol: UDP
+      port: 53
+    - protocol: TCP
       port: 53
   {{- end }}
 

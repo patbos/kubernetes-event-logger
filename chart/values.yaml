@@ -178,11 +178,19 @@ networkPolicy:
       namespaceSelector:
         matchLabels:
           name: prometheus
-  # Egress: allow DNS and HTTPS to namespaces matching the built-in kube-system selector.
+  # Egress: allow HTTPS to the Kubernetes API by default.
   egress:
-    # Allow DNS queries (port 53 UDP)
+    # Optional DNS egress for custom configurations that require DNS resolution.
+    # Disabled by default because in-cluster Kubernetes API access uses
+    # KUBERNETES_SERVICE_HOST/KUBERNETES_SERVICE_PORT rather than DNS.
     dns:
-      enabled: true
+      enabled: false
+      namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+      podSelector:
+        matchLabels:
+          k8s-app: kube-dns
     # Allow HTTPS egress (port 443 TCP) to namespaces matching the selector below.
     kubernetesAPI:
       enabled: true

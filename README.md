@@ -238,7 +238,10 @@ Common chart values:
 | `leaderElection.renewDeadline` | Lease renew deadline | `10s` |
 | `leaderElection.retryPeriod` | Lease retry interval | `2s` |
 | `serviceMonitor.enabled` | Create a Prometheus Operator `ServiceMonitor` | `false` |
-| `networkPolicy.enabled` | Create a `NetworkPolicy` for metrics ingress plus configured DNS and kube-system HTTPS egress | `false` |
+| `networkPolicy.enabled` | Create a `NetworkPolicy` for metrics ingress and Kubernetes API egress | `false` |
+| `networkPolicy.egress.dns.enabled` | Allow DNS egress to the configured DNS namespace and pod selectors; disabled by default because in-cluster API access does not require DNS | `false` |
+| `networkPolicy.egress.dns.namespaceSelector` | Namespace selector for optional DNS egress | `kubernetes.io/metadata.name: kube-system` |
+| `networkPolicy.egress.dns.podSelector` | Pod selector for optional DNS egress | `k8s-app: kube-dns` |
 | `podDisruptionBudget.enabled` | Create a PodDisruptionBudget | `true` |
 | `podDisruptionBudget.minAvailable` | Minimum available pods during voluntary disruptions | `1` |
 | `resources` | Pod resource requests and limits | see [`chart/values.yaml`](chart/values.yaml) |
