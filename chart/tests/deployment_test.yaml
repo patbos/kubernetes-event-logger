@@ -147,6 +147,42 @@ tests:
           path: spec.template.spec.containers[0].args
           content: -retry-period=2s
 
+  - it: should expose separate health and metrics ports
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].ports
+          content:
+            name: health
+            containerPort: 8080
+            protocol: TCP
+      - contains:
+          path: spec.template.spec.containers[0].ports
+          content:
+            name: metrics
+            containerPort: 9090
+            protocol: TCP
+
+  - it: should pass separate health and metrics bind args
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: -health-addr=:8080
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: -metrics-addr=:9090
+
+  - it: should point probes at the health port
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].startupProbe.httpGet.port
+          value: 8080
+      - equal:
+          path: spec.template.spec.containers[0].livenessProbe.httpGet.port
+          value: 8080
+      - equal:
+          path: spec.template.spec.containers[0].readinessProbe.httpGet.port
+          value: 8080
+
   # Optional flags
   - it: should not include detailed metrics flag by default
     asserts:

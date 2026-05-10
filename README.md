@@ -8,7 +8,7 @@ A lightweight Kubernetes event logger that watches cluster events and writes new
 
 ## Overview
 
-`kubernetes-event-logger` watches `core/v1` `Event` resources across the cluster and emits them in a log-friendly JSON envelope. It ignores historical events that already existed before the active leader began processing, supports repeated exclusion rules, and exposes Prometheus metrics plus HTTP health endpoints on port `8080`.
+`kubernetes-event-logger` watches `core/v1` `Event` resources across the cluster and emits them in a log-friendly JSON envelope. It ignores historical events that already existed before the active leader began processing, supports repeated exclusion rules, exposes HTTP health endpoints on port `8080`, and exposes Prometheus metrics on port `9090`.
 
 The binary is intended to run either:
 
@@ -158,6 +158,8 @@ The binary first tries the supplied kubeconfig path. If that fails, it falls bac
 | `-lease-duration` | Duration a leader lease remains valid | `15s` |
 | `-renew-deadline` | Time the leader has to renew the lease | `10s` |
 | `-retry-period` | Retry interval for acquiring or renewing the lease | `2s` |
+| `-health-addr` | Address for HTTP health endpoints | `:8080` |
+| `-metrics-addr` | Address for Prometheus metrics endpoint | `:9090` |
 | `-log-format` | Event JSON log format: `flat`, `legacy`, or `message` | `flat` |
 | `-enable-detailed-metrics` | Enable high-cardinality metrics (namespace, reason, kind) | `false` |
 | `-exclude-filter` | Exclude events matching all clauses in one rule; repeatable | none |
@@ -229,6 +231,8 @@ Common chart values:
 | `excludeFilters` | List of event exclusion rules | `[]` |
 | `logFormat` | Event JSON log format: `flat`, `legacy`, or `message` | `flat` |
 | `enableDetailedMetrics` | Enable high-cardinality Prometheus metrics | `false` |
+| `healthPort.containerPort` | Container port for `/healthz` and `/readyz` | `8080` |
+| `metricsPort.containerPort` | Container and Service port for `/metrics` | `9090` |
 | `leaderElection.leaseDuration` | Leader lease duration | `15s` |
 | `leaderElection.renewDeadline` | Lease renew deadline | `10s` |
 | `leaderElection.retryPeriod` | Lease retry interval | `2s` |
@@ -284,13 +288,13 @@ kubectl label namespace <namespace> \
 
 ## HTTP Endpoints
 
-The process listens on port `8080`.
+The process listens on separate ports for health and metrics. Health endpoints are not exposed through the chart Service by default; the Service targets only the metrics port for Prometheus scraping.
 
-| Path | Purpose |
-|---|---|
-| `/metrics` | Prometheus metrics |
-| `/healthz` | JSON health response used by the liveness probe |
-| `/readyz` | JSON health response used by the readiness probe |
+| Port | Path | Purpose |
+|---|---|---|
+| `8080` | `/healthz` | JSON health response used by the liveness probe |
+| `8080` | `/readyz` | JSON health response used by the readiness probe |
+| `9090` | `/metrics` | Prometheus metrics |
 
 Example `/healthz` response:
 
@@ -308,7 +312,7 @@ Both endpoints currently return the same JSON payload and status code. They retu
 
 ## Metrics
 
-Prometheus metrics currently exposed at `/metrics`:
+Prometheus metrics are exposed at `/metrics` on the metrics port, which defaults to `9090`:
 
 - `kubernetes_event_logger_events_total`
 - `kubernetes_event_logger_events_filtered_total`

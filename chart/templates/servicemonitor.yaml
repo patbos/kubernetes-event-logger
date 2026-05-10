@@ -13,7 +13,7 @@ spec:
     matchLabels:
       {{- include "kubernetes-event-logger.selectorLabels" . | nindent 6 }}
   endpoints:
-    - port: {{ .Values.port.name }}
+    - port: {{ .Values.metricsPort.name }}
       interval: {{ .Values.serviceMonitor.interval }}
       scrapeTimeout: {{ .Values.serviceMonitor.scrapeTimeout }}
       {{- if .Values.serviceMonitor.relabelings }}

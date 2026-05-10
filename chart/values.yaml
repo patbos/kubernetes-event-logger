@@ -63,8 +63,12 @@ resources:
     cpu: 500m
     memory: 512Mi
 
-port:
+healthPort:
   containerPort: 8080
+  name: health
+
+metricsPort:
+  containerPort: 9090
   name: metrics
 
 startupProbe:

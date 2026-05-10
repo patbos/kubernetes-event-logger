@@ -41,14 +41,19 @@ spec:
           image: "{{ include "kubernetes-event-logger.image" . }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           ports:
-            - name: {{ .Values.port.name }}
-              containerPort: {{ .Values.port.containerPort }}
+            - name: {{ .Values.healthPort.name }}
+              containerPort: {{ .Values.healthPort.containerPort }}
+              protocol: TCP
+            - name: {{ .Values.metricsPort.name }}
+              containerPort: {{ .Values.metricsPort.containerPort }}
               protocol: TCP
           args:
             - -lease-name={{ include "kubernetes-event-logger.leaseName" . }}
             - -lease-duration={{ .Values.leaderElection.leaseDuration }}
             - -renew-deadline={{ .Values.leaderElection.renewDeadline }}
             - -retry-period={{ .Values.leaderElection.retryPeriod }}
+            - -health-addr=:{{ .Values.healthPort.containerPort }}
+            - -metrics-addr=:{{ .Values.metricsPort.containerPort }}
             - -log-format={{ .Values.logFormat }}
             {{- if .Values.enableDetailedMetrics }}
             - -enable-detailed-metrics
@@ -64,11 +69,11 @@ spec:
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           startupProbe:
-            {{- include "kubernetes-event-logger.httpProbe" (dict "config" .Values.startupProbe "port" .Values.port.containerPort "path" "/healthz") | nindent 12 }}
+            {{- include "kubernetes-event-logger.httpProbe" (dict "config" .Values.startupProbe "port" .Values.healthPort.containerPort "path" "/healthz") | nindent 12 }}
           livenessProbe:
-            {{- include "kubernetes-event-logger.httpProbe" (dict "config" .Values.livenessProbe "port" .Values.port.containerPort "path" "/healthz") | nindent 12 }}
+            {{- include "kubernetes-event-logger.httpProbe" (dict "config" .Values.livenessProbe "port" .Values.healthPort.containerPort "path" "/healthz") | nindent 12 }}
           readinessProbe:
-            {{- include "kubernetes-event-logger.httpProbe" (dict "config" .Values.readinessProbe "port" .Values.port.containerPort "path" "/readyz") | nindent 12 }}
+            {{- include "kubernetes-event-logger.httpProbe" (dict "config" .Values.readinessProbe "port" .Values.healthPort.containerPort "path" "/readyz") | nindent 12 }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

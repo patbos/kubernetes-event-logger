@@ -22,7 +22,7 @@ spec:
           {{- toYaml .Values.networkPolicy.ingress.prometheus.namespaceSelector.matchLabels | nindent 12 }}
     ports:
     - protocol: TCP
-      port: {{ .Values.port.containerPort }}
+      port: {{ .Values.metricsPort.containerPort }}
   {{- end }}
 
   # Egress: Allow DNS queries and Kubernetes API access
