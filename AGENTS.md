@@ -31,4 +31,4 @@ Add table-driven Go tests in `_test.go` files beside the code they cover. Priori
 Recent history uses short, imperative commit subjects such as `Add Prometheus metrics and Helm chart for event logger` and `Chart improvements`. Keep commits focused and descriptive. PRs should explain the behavior change, call out any chart or flag changes, link related issues when applicable, and include example output or Helm values when user-facing behavior changes.
 
 ## Security & Configuration Tips
-Do not commit kubeconfig files, cluster secrets, or generated binaries. Prefer testing locally with `-kubeconfig` and keep RBAC or chart permission changes minimal and explicit in both code and PR notes.
+Do not commit kubeconfig files, cluster secrets, or generated binaries. Prefer testing locally with `-kubeconfig` and keep RBAC or chart permission changes minimal and explicit in both code and PR notes. Pin GitHub Actions by commit SHA instead of version tags, keeping the version as an inline comment for readability.
