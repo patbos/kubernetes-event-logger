@@ -34,7 +34,7 @@ The binary is intended to run either:
 - Go `1.26.2+` to build from source
 - Access to a Kubernetes cluster
 - RBAC permission to read `events`
-- RBAC permission to manage a `Lease` in the deployment namespace for leader election
+- RBAC permission to `create` `Lease` resources in the deployment namespace, and to `get` and `update` the named leader-election `Lease`
 - If you use Pod Security Admission, label the target namespace separately; this chart does not enforce PSA by applying pod labels
 
 ## Installation
@@ -275,9 +275,11 @@ During failover or rollout, some events can be logged twice. Downstream consumer
 The application needs:
 
 - a cluster-scoped permission set to `get`, `list`, and `watch` `events`
-- a namespaced permission set to `get` and `update` the leader-election `Lease` in `coordination.k8s.io`
+- a namespaced permission to `create` `leases` in `coordination.k8s.io`, plus `get` and `update` on the named leader-election `Lease`
 
-The bundled Helm chart creates the required ServiceAccount, ClusterRole, ClusterRoleBinding, Role, RoleBinding, and pre-created `Lease` resources.
+`client-go`'s leader election creates the `Lease` on first start if it does not exist. The chart therefore does not pre-create the `Lease`; the `create` verb cannot be restricted by `resourceNames` in Kubernetes RBAC, but the rule is still namespace-scoped via the `Role`, so the ServiceAccount can only create `Lease` resources in its own namespace.
+
+The bundled Helm chart creates the required ServiceAccount, ClusterRole, ClusterRoleBinding, Role, and RoleBinding.
 If you set `serviceAccount.create=false`, you must also set `serviceAccount.name` so the chart binds permissions to an explicit existing ServiceAccount.
 
 ## Pod Security
