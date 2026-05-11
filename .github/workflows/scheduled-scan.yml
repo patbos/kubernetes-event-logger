@@ -13,42 +13,75 @@ permissions:
 
 env:
   REGISTRY: ghcr.io
+  IMAGE_NAME: kubernetes-event-logger
 
 jobs:
   scan:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        # Scan latest released image for new CVEs discovered after release
-        image:
-          - name: kubernetes-event-logger
-            tag: latest
 
     steps:
+      - name: Resolve latest release tag
+        id: release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # Resolve the most recent GitHub Release (the "Latest" one),
+          # not the most recent tag, so prereleases/draft tags are ignored.
+          tag="$(gh release view \
+            --repo "${GITHUB_REPOSITORY}" \
+            --json tagName \
+            --jq .tagName)"
+
+          if [ -z "$tag" ]; then
+            echo "Failed to resolve latest release tag" >&2
+            exit 1
+          fi
+
+          echo "Latest release tag: $tag"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
       - name: Run Trivy scan
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25  # master
         with:
-          image-ref: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.image.name }}:${{ matrix.image.tag }}
+          image-ref: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:${{ steps.release.outputs.tag }}
           format: sarif
-          output: trivy-${{ matrix.image.tag }}-results.sarif
+          output: trivy-results.sarif
           severity: CRITICAL,HIGH
+          exit-code: "1"
 
       - name: Upload Trivy results
         uses: github/codeql-action/upload-sarif@68bde559dea0fdcac2102bfdf6230c5f70eb485e  # v4.35.4
         if: always()
         with:
-          sarif_file: trivy-${{ matrix.image.tag }}-results.sarif
-          category: trivy-${{ matrix.image.tag }}
+          sarif_file: trivy-results.sarif
+          category: trivy-release
 
       - name: Create issue if vulnerabilities found
         if: failure()
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3  # v9.0.0
+        env:
+          IMAGE_REF: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:${{ steps.release.outputs.tag }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
         with:
           script: |
+            const imageRef = process.env.IMAGE_REF;
+            const releaseTag = process.env.RELEASE_TAG;
             github.rest.issues.create({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              title: '🔴 New vulnerabilities detected in ${{ matrix.image.name }}:${{ matrix.image.tag }}',
-              body: 'A scheduled Trivy scan found new vulnerabilities in the `${{ matrix.image.tag }}` image.\n\nCheck the [Security tab](https://github.com/${{ github.repository }}/security/code-scanning) for details.\n\n**Image:** `${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.image.name }}:${{ matrix.image.tag }}`\n\n**Next steps:**\n1. Review findings in the Security tab\n2. If critical, rebuild and release a patched version\n3. Update base image or dependencies as needed',
+              title: `New vulnerabilities detected in ${context.repo.repo}:${releaseTag}`,
+              body: [
+                `A scheduled Trivy scan found new vulnerabilities in the latest release \`${releaseTag}\`.`,
+                ``,
+                `Check the [Security tab](https://github.com/${context.repo.owner}/${context.repo.repo}/security/code-scanning) for details.`,
+                ``,
+                `**Image:** \`${imageRef}\``,
+                ``,
+                `**Next steps:**`,
+                `1. Review findings in the Security tab`,
+                `2. If critical, rebuild and release a patched version`,
+                `3. Update base image or dependencies as needed`,
+              ].join('\n'),
               labels: ['security', 'trivy', 'automated']
             })
