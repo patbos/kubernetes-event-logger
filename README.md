@@ -238,10 +238,13 @@ Common chart values:
 | `leaderElection.renewDeadline` | Lease renew deadline | `10s` |
 | `leaderElection.retryPeriod` | Lease retry interval | `2s` |
 | `serviceMonitor.enabled` | Create a Prometheus Operator `ServiceMonitor` | `false` |
-| `networkPolicy.enabled` | Create a `NetworkPolicy` for metrics ingress and Kubernetes API egress | `false` |
+| `networkPolicy.enabled` | Create a `NetworkPolicy` for metrics ingress and explicit Kubernetes API egress | `false` |
 | `networkPolicy.egress.dns.enabled` | Allow DNS egress to the configured DNS namespace and pod selectors; disabled by default because in-cluster API access does not require DNS | `false` |
 | `networkPolicy.egress.dns.namespaceSelector` | Namespace selector for optional DNS egress | `kubernetes.io/metadata.name: kube-system` |
 | `networkPolicy.egress.dns.podSelector` | Pod selector for optional DNS egress | `k8s-app: kube-dns` |
+| `networkPolicy.egress.kubernetesAPI.ipBlocks` | Kubernetes API IP/CIDR blocks for NetworkPolicy egress; required when `networkPolicy.enabled=true` and Kubernetes API egress is enabled | `[]` |
+| `networkPolicy.egress.kubernetesAPI.port` | Kubernetes API egress port | `443` |
+| `networkPolicy.extraEgress` | Additional user-provided NetworkPolicy egress rules appended as-is | `[]` |
 | `podDisruptionBudget.enabled` | Create a PodDisruptionBudget | `true` |
 | `podDisruptionBudget.minAvailable` | Minimum available pods during voluntary disruptions | `1` |
 | `resources` | Pod resource requests and limits | see [`chart/values.yaml`](chart/values.yaml) |

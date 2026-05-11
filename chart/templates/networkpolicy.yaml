@@ -1,4 +1,7 @@
 {{- if .Values.networkPolicy.enabled }}
+{{- if and .Values.networkPolicy.egress.kubernetesAPI.enabled (empty .Values.networkPolicy.egress.kubernetesAPI.ipBlocks) }}
+{{- fail "networkPolicy.egress.kubernetesAPI.ipBlocks must contain at least one cidr when Kubernetes API egress is enabled" }}
+{{- end }}
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -42,13 +45,23 @@ spec:
   {{- end }}
 
   {{- if .Values.networkPolicy.egress.kubernetesAPI.enabled }}
-  # Allow HTTPS (TCP port 443) to namespaces labeled name=kube-system
+  # Allow HTTPS to the configured Kubernetes API IP/CIDR blocks
+  {{- range .Values.networkPolicy.egress.kubernetesAPI.ipBlocks }}
   - to:
-    - namespaceSelector:
-        matchLabels:
-          name: kube-system
+    - ipBlock:
+        cidr: {{ .cidr | quote }}
+        {{- with .except }}
+        except:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
     ports:
     - protocol: TCP
-      port: 443
+      port: {{ $.Values.networkPolicy.egress.kubernetesAPI.port }}
+  {{- end }}
+  {{- end }}
+
+  {{- with .Values.networkPolicy.extraEgress }}
+  # Additional user-provided egress rules
+  {{- toYaml . | nindent 2 }}
   {{- end }}
 {{- end }}

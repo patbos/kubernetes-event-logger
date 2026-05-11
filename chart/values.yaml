@@ -191,6 +191,16 @@ networkPolicy:
       podSelector:
         matchLabels:
           k8s-app: kube-dns
-    # Allow HTTPS egress (port 443 TCP) to namespaces matching the selector below.
+    # Allow HTTPS egress to the Kubernetes API by explicit IP/CIDR.
+    # Set this to the default/kubernetes Service clusterIP as /32, or to the
+    # API endpoint CIDR required by your CNI/network topology.
     kubernetesAPI:
       enabled: true
+      port: 443
+      ipBlocks: []
+      # Example:
+      # ipBlocks:
+      #   - cidr: 10.96.0.1/32
+  # Additional egress rules appended to the NetworkPolicy as-is.
+  # Use this for CNI-specific features or cluster-specific destinations.
+  extraEgress: []
