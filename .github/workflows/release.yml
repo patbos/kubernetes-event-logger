@@ -6,6 +6,11 @@ on:
       - "v*"
 
 permissions:
+  # contents: write -- required by softprops/action-gh-release to create the
+  #                    GitHub Release object. No other step in this workflow
+  #                    writes to repo contents.
+  # packages: write -- required to push the image and chart to GHCR.
+  # id-token: write -- required for cosign keyless signing via Sigstore.
   contents: write
   packages: write
   id-token: write
@@ -37,26 +42,10 @@ jobs:
           echo "VERSION=$VERSION" >> "$GITHUB_OUTPUT"
           echo "TAG=$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
 
-      - name: Update Chart.yaml
-        run: |
-          VERSION=${{ steps.version.outputs.VERSION }}
-          echo "Updating chart/Chart.yaml to version $VERSION"
-
-          # Update version and appVersion
-          sed -i "s/^version:.*/version: $VERSION/" chart/Chart.yaml
-          sed -i "s/^appVersion:.*/appVersion: \"$VERSION\"/" chart/Chart.yaml
-
-          # Verify changes
-          echo "Verifying updates:"
-          grep -E "^version:|^appVersion:" chart/Chart.yaml
-
-      - name: Commit Chart.yaml changes
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add chart/Chart.yaml
-          git commit -m "Bump chart version to ${{ steps.version.outputs.TAG }}" || echo "No changes to commit"
-          git push origin main || echo "Already up to date"
+      # Note: chart/Chart.yaml is treated as a template; its version/appVersion
+      # fields are intentionally not kept in sync with releases. The packaged
+      # chart's metadata is set authoritatively below via
+      # `helm package --version --app-version`.
 
       - name: Normalize image name
         id: image
