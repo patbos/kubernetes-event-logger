@@ -95,3 +95,27 @@ tests:
       - equal:
           path: roleRef.kind
           value: Role
+
+  - it: should grant create on leases for first-start Lease initialisation
+    template: role.yaml
+    asserts:
+      - equal:
+          path: rules[1].apiGroups[0]
+          value: coordination.k8s.io
+      - equal:
+          path: rules[1].resources[0]
+          value: leases
+      - contains:
+          path: rules[1].verbs
+          content: create
+      # RBAC does not allow resourceNames on the create verb; this rule
+      # must therefore not be scoped by name.
+      - notExists:
+          path: rules[1].resourceNames
+
+  - it: should expose exactly two leader-election rules
+    template: role.yaml
+    asserts:
+      - lengthEqual:
+          path: rules
+          count: 2

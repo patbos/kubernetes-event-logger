@@ -5,7 +5,16 @@ metadata:
   labels:
     {{- include "kubernetes-event-logger.labels" . | nindent 4 }}
 rules:
+  # get/update is scoped to the single leader-election Lease this release owns.
   - apiGroups: ["coordination.k8s.io"]
     resources: ["leases"]
     resourceNames: ["{{ include "kubernetes-event-logger.leaseName" . }}"]
     verbs: ["get", "update"]
+  # create is required so client-go can initialise the Lease on first start
+  # (or after a manual delete). Kubernetes RBAC does not allow resourceNames
+  # on the create verb, so this rule covers any Lease in the release namespace.
+  # The Role is still namespace-scoped; the SA cannot create cluster-wide
+  # Leases or Leases outside its namespace.
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["create"]
