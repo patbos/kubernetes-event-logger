@@ -133,10 +133,6 @@ leaderElection:
 # Event JSON log format. Supported values: flat, legacy, message.
 logFormat: flat
 
-# Enable high-cardinality metrics (events by namespace, reason, and object kind).
-# Recommendation: Keep disabled in large clusters to avoid Prometheus performance issues.
-enableDetailedMetrics: false
-
 # List of event exclusion rules.
 # Each rule excludes events only when all configured fields match.
 # Supported keys: namespace, kind, name, reason, type, reportingComponent, reportingController, sourceComponent

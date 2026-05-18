@@ -162,7 +162,6 @@ The binary uses a kubeconfig when `-kubeconfig` is non-empty. If `-kubeconfig` i
 | `-health-addr` | Address for HTTP health endpoints | `:8080` |
 | `-metrics-addr` | Address for Prometheus metrics endpoint | `:9090` |
 | `-log-format` | Event JSON log format: `flat`, `legacy`, or `message` | `flat` |
-| `-enable-detailed-metrics` | Enable high-cardinality metrics (namespace, reason, kind) | `false` |
 | `-exclude-filter` | Exclude events matching all clauses in one rule; repeatable | none |
 
 `-exclude-filter` syntax:
@@ -231,7 +230,6 @@ Common chart values:
 | `serviceAccount.name` | ServiceAccount name override; required when `serviceAccount.create=false` | `""` |
 | `excludeFilters` | List of event exclusion rules | `[]` |
 | `logFormat` | Event JSON log format: `flat`, `legacy`, or `message` | `flat` |
-| `enableDetailedMetrics` | Enable high-cardinality Prometheus metrics | `false` |
 | `healthPort.containerPort` | Container port for `/healthz` and `/readyz` | `8080` |
 | `metricsPort.containerPort` | Container and Service port for `/metrics` | `9090` |
 | `leaderElection.leaseDuration` | Leader lease duration | `15s` |
@@ -329,9 +327,6 @@ Prometheus metrics are exposed at `/metrics` on the metrics port, which defaults
 - `kubernetes_event_logger_leader`
 - `kubernetes_event_logger_leader_elections_total`
 - `kubernetes_event_logger_informer_cache_sync_duration_seconds`
-- `kubernetes_event_logger_events_by_namespace_total` (optional, via `-enable-detailed-metrics`)
-- `kubernetes_event_logger_events_by_reason_total` (optional, via `-enable-detailed-metrics`)
-- `kubernetes_event_logger_events_by_object_kind_total` (optional, via `-enable-detailed-metrics`)
 
 ## Output Format
 

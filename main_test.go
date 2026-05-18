@@ -24,11 +24,10 @@ import (
 )
 
 type fakeEventProcessorMetrics struct {
-	loggedEvents    []*v1.Event
-	detailedMetrics []bool
-	filtered        map[string]int
-	failed          map[string]int
-	durations       []time.Duration
+	loggedEvents []*v1.Event
+	filtered     map[string]int
+	failed       map[string]int
+	durations    []time.Duration
 }
 
 func newFakeEventProcessorMetrics() *fakeEventProcessorMetrics {
@@ -38,9 +37,8 @@ func newFakeEventProcessorMetrics() *fakeEventProcessorMetrics {
 	}
 }
 
-func (m *fakeEventProcessorMetrics) eventLogged(event *v1.Event, detailedMetrics bool) {
+func (m *fakeEventProcessorMetrics) eventLogged(event *v1.Event) {
 	m.loggedEvents = append(m.loggedEvents, event)
-	m.detailedMetrics = append(m.detailedMetrics, detailedMetrics)
 }
 
 func (m *fakeEventProcessorMetrics) eventFiltered(filterType string) {
@@ -58,18 +56,16 @@ func (m *fakeEventProcessorMetrics) observeProcessingDuration(duration time.Dura
 func newTestEventProcessor(
 	leaderStatus leaderStatusFunc,
 	excludeFilters eventFilters,
-	detailedMetrics bool,
 	metrics *fakeEventProcessorMetrics,
 	output *bytes.Buffer,
 ) *eventProcessor {
 	return &eventProcessor{
-		leaderStatus:    leaderStatus,
-		excludeFilters:  excludeFilters,
-		logger:          log.New(output, "", 0),
-		detailedMetrics: detailedMetrics,
-		metrics:         metrics,
-		format:          legacyEventLogEntry,
-		marshal:         json.Marshal,
+		leaderStatus:   leaderStatus,
+		excludeFilters: excludeFilters,
+		logger:         log.New(output, "", 0),
+		metrics:        metrics,
+		format:         legacyEventLogEntry,
+		marshal:        json.Marshal,
 		now: func() time.Time {
 			return time.Unix(100, 0).UTC()
 		},
@@ -298,7 +294,6 @@ func TestEventProcessorProcessesLeaderEvent(t *testing.T) {
 	processor := newTestEventProcessor(
 		func() (bool, time.Time) { return true, leaderStart },
 		nil,
-		true,
 		metrics,
 		&output,
 	)
@@ -307,9 +302,6 @@ func TestEventProcessorProcessesLeaderEvent(t *testing.T) {
 
 	if len(metrics.loggedEvents) != 1 {
 		t.Fatalf("logged events = %d, want 1", len(metrics.loggedEvents))
-	}
-	if !metrics.detailedMetrics[0] {
-		t.Fatal("detailedMetrics = false, want true")
 	}
 	if len(metrics.durations) != 1 {
 		t.Fatalf("durations = %d, want 1", len(metrics.durations))
@@ -339,7 +331,6 @@ func TestEventProcessorSkipsWhenNotLeader(t *testing.T) {
 	processor := newTestEventProcessor(
 		func() (bool, time.Time) { return false, time.Now() },
 		nil,
-		false,
 		metrics,
 		&output,
 	)
@@ -360,7 +351,6 @@ func TestEventProcessorIgnoresNonEventObjects(t *testing.T) {
 	processor := newTestEventProcessor(
 		func() (bool, time.Time) { return true, time.Unix(100, 0).UTC() },
 		nil,
-		false,
 		metrics,
 		&output,
 	)
@@ -384,31 +374,6 @@ func TestEventProcessorIgnoresNonEventObjects(t *testing.T) {
 	}
 }
 
-func TestEventProcessorPreservesDetailedMetricsFlag(t *testing.T) {
-	var output bytes.Buffer
-	metrics := newFakeEventProcessorMetrics()
-	leaderStart := time.Unix(100, 0).UTC()
-	processor := newTestEventProcessor(
-		func() (bool, time.Time) { return true, leaderStart },
-		nil,
-		false,
-		metrics,
-		&output,
-	)
-
-	processor.process(&v1.Event{
-		Type:      "Warning",
-		EventTime: metav1.MicroTime{Time: leaderStart.Add(time.Second)},
-	})
-
-	if len(metrics.loggedEvents) != 1 {
-		t.Fatalf("logged events = %d, want 1", len(metrics.loggedEvents))
-	}
-	if metrics.detailedMetrics[0] {
-		t.Fatal("detailedMetrics = true, want false")
-	}
-}
-
 func TestEventProcessorObservesProcessingDuration(t *testing.T) {
 	var output bytes.Buffer
 	metrics := newFakeEventProcessorMetrics()
@@ -416,7 +381,6 @@ func TestEventProcessorObservesProcessingDuration(t *testing.T) {
 	processor := newTestEventProcessor(
 		func() (bool, time.Time) { return true, leaderStart },
 		nil,
-		false,
 		metrics,
 		&output,
 	)
@@ -455,7 +419,6 @@ func TestEventProcessorPassesExpectedEntryToMarshal(t *testing.T) {
 	processor := newTestEventProcessor(
 		func() (bool, time.Time) { return true, leaderStart },
 		nil,
-		false,
 		metrics,
 		&output,
 	)
@@ -499,7 +462,6 @@ func TestEventProcessorUsesConfiguredFormatter(t *testing.T) {
 	processor := newTestEventProcessor(
 		func() (bool, time.Time) { return true, leaderStart },
 		nil,
-		false,
 		metrics,
 		&output,
 	)
@@ -618,7 +580,6 @@ func TestEventProcessorDoesNotMarshalFilteredEvents(t *testing.T) {
 			processor := newTestEventProcessor(
 				func() (bool, time.Time) { return true, leaderStart },
 				tc.excludeFilters,
-				false,
 				metrics,
 				&output,
 			)
@@ -652,7 +613,6 @@ func TestEventProcessorFiltersHistoricalEvents(t *testing.T) {
 	processor := newTestEventProcessor(
 		func() (bool, time.Time) { return true, leaderStart },
 		nil,
-		false,
 		metrics,
 		&output,
 	)
@@ -677,7 +637,6 @@ func TestEventProcessorAppliesExcludeFilters(t *testing.T) {
 	processor := newTestEventProcessor(
 		func() (bool, time.Time) { return true, leaderStart },
 		eventFilters{{Namespace: "kube-system", Type: "Normal"}},
-		false,
 		metrics,
 		&output,
 	)
@@ -703,7 +662,6 @@ func TestEventProcessorRecordsMarshalFailures(t *testing.T) {
 	processor := newTestEventProcessor(
 		func() (bool, time.Time) { return true, leaderStart },
 		nil,
-		false,
 		metrics,
 		&output,
 	)
@@ -2018,9 +1976,9 @@ func TestEventLogEntryFormat(t *testing.T) {
 
 func TestNewAppMetricsRegistersAllMetrics(t *testing.T) {
 	reg := prometheus.NewRegistry()
-	m := newAppMetrics(reg, true)
+	m := newAppMetrics(reg)
 
-	// All fields must be populated when detailed metrics are enabled.
+	// All fields must be populated.
 	if m.eventsTotal == nil {
 		t.Error("eventsTotal is nil")
 	}
@@ -2042,15 +2000,6 @@ func TestNewAppMetricsRegistersAllMetrics(t *testing.T) {
 	if m.eventProcessingDuration == nil {
 		t.Error("eventProcessingDuration is nil")
 	}
-	if m.eventsByNamespaceTotal == nil {
-		t.Error("eventsByNamespaceTotal is nil")
-	}
-	if m.eventsByReasonTotal == nil {
-		t.Error("eventsByReasonTotal is nil")
-	}
-	if m.eventsByObjectKindTotal == nil {
-		t.Error("eventsByObjectKindTotal is nil")
-	}
 	if m.informerCacheSyncDuration == nil {
 		t.Error("informerCacheSyncDuration is nil")
 	}
@@ -2064,57 +2013,10 @@ func TestNewAppMetricsRegistersAllMetrics(t *testing.T) {
 	m.eventsFilteredTotal.WithLabelValues("historical").Inc()
 	m.eventsFailedTotal.WithLabelValues("marshal_error").Inc()
 	m.eventProcessingDuration.Observe(0.001)
-	m.eventsByNamespaceTotal.WithLabelValues("default").Inc()
-	m.eventsByReasonTotal.WithLabelValues("Scheduled").Inc()
-	m.eventsByObjectKindTotal.WithLabelValues("Pod").Inc()
 	m.informerCacheSyncDuration.Set(0.5)
 
 	// All metrics must be gathered from the registry without error — confirms
 	// every metric was registered and none were silently dropped.
-	mfs, err := reg.Gather()
-	if err != nil {
-		t.Fatalf("registry.Gather() error: %v", err)
-	}
-	if len(mfs) != 11 {
-		t.Errorf("gathered %d metric families, want 11", len(mfs))
-	}
-}
-
-func TestNewAppMetricsWithoutDetailedMetrics(t *testing.T) {
-	reg := prometheus.NewRegistry()
-	m := newAppMetrics(reg, false)
-
-	// Core metrics must be populated.
-	if m.eventsTotal == nil {
-		t.Error("eventsTotal is nil")
-	}
-	if m.leaderGauge == nil {
-		t.Error("leaderGauge is nil")
-	}
-	if m.informerCacheSyncDuration == nil {
-		t.Error("informerCacheSyncDuration is nil")
-	}
-
-	// Detailed metrics must NOT be registered.
-	if m.eventsByNamespaceTotal != nil {
-		t.Error("eventsByNamespaceTotal should be nil when detailed metrics are disabled")
-	}
-	if m.eventsByReasonTotal != nil {
-		t.Error("eventsByReasonTotal should be nil when detailed metrics are disabled")
-	}
-	if m.eventsByObjectKindTotal != nil {
-		t.Error("eventsByObjectKindTotal should be nil when detailed metrics are disabled")
-	}
-
-	// Only core metrics should be gathered (8 instead of 11).
-	m.eventsTotal.WithLabelValues("Normal").Inc()
-	m.leaderGauge.Set(1)
-	m.leaderElectionsTotal.Inc()
-	m.lastEventTimestamp.SetToCurrentTime()
-	m.eventsFilteredTotal.WithLabelValues("historical").Inc()
-	m.eventsFailedTotal.WithLabelValues("marshal_error").Inc()
-	m.eventProcessingDuration.Observe(0.001)
-	m.informerCacheSyncDuration.Set(0.5)
 	mfs, err := reg.Gather()
 	if err != nil {
 		t.Fatalf("registry.Gather() error: %v", err)
@@ -2126,13 +2028,13 @@ func TestNewAppMetricsWithoutDetailedMetrics(t *testing.T) {
 
 func TestNewAppMetricsPanicsOnDuplicateRegistry(t *testing.T) {
 	reg := prometheus.NewRegistry()
-	newAppMetrics(reg, true)
+	newAppMetrics(reg)
 	defer func() {
 		if r := recover(); r == nil {
 			t.Error("expected panic on duplicate registration, got none")
 		}
 	}()
-	newAppMetrics(reg, true)
+	newAppMetrics(reg)
 }
 
 func TestRunInvalidFlag(t *testing.T) {

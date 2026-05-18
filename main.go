@@ -114,18 +114,17 @@ func messageEventLogEntryFor(event *v1.Event) any {
 type leaderStatusFunc func() (bool, time.Time)
 
 type eventProcessor struct {
-	leaderStatus    leaderStatusFunc
-	excludeFilters  eventFilters
-	logger          *log.Logger
-	detailedMetrics bool
-	metrics         eventProcessorMetrics
-	format          eventFormatter
-	marshal         func(v any) ([]byte, error)
-	now             func() time.Time
+	leaderStatus   leaderStatusFunc
+	excludeFilters eventFilters
+	logger         *log.Logger
+	metrics        eventProcessorMetrics
+	format         eventFormatter
+	marshal        func(v any) ([]byte, error)
+	now            func() time.Time
 }
 
 type eventProcessorMetrics interface {
-	eventLogged(event *v1.Event, detailedMetrics bool)
+	eventLogged(event *v1.Event)
 	eventFiltered(filterType string)
 	eventFailed(reason string)
 	observeProcessingDuration(duration time.Duration)
@@ -270,13 +269,10 @@ type appMetrics struct {
 	eventsFilteredTotal       *prometheus.CounterVec
 	eventsFailedTotal         *prometheus.CounterVec
 	eventProcessingDuration   prometheus.Histogram
-	eventsByNamespaceTotal    *prometheus.CounterVec
-	eventsByReasonTotal       *prometheus.CounterVec
-	eventsByObjectKindTotal   *prometheus.CounterVec
 	informerCacheSyncDuration prometheus.Gauge
 }
 
-func newAppMetrics(reg prometheus.Registerer, enableDetailedMetrics bool) *appMetrics {
+func newAppMetrics(reg prometheus.Registerer) *appMetrics {
 	m := &appMetrics{
 		eventsTotal: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
@@ -325,25 +321,6 @@ func newAppMetrics(reg prometheus.Registerer, enableDetailedMetrics bool) *appMe
 		m.eventProcessingDuration,
 		m.informerCacheSyncDuration,
 	)
-	if enableDetailedMetrics {
-		m.eventsByNamespaceTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
-			Name: "kubernetes_event_logger_events_by_namespace_total",
-			Help: "Total number of events logged, broken down by namespace.",
-		}, []string{"namespace"})
-		m.eventsByReasonTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
-			Name: "kubernetes_event_logger_events_by_reason_total",
-			Help: "Total number of events logged, broken down by reason.",
-		}, []string{"reason"})
-		m.eventsByObjectKindTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
-			Name: "kubernetes_event_logger_events_by_object_kind_total",
-			Help: "Total number of events logged, broken down by involved object kind.",
-		}, []string{"object_kind"})
-		reg.MustRegister(
-			m.eventsByNamespaceTotal,
-			m.eventsByReasonTotal,
-			m.eventsByObjectKindTotal,
-		)
-	}
 	return m
 }
 
@@ -351,13 +328,8 @@ type prometheusEventProcessorMetrics struct {
 	m *appMetrics
 }
 
-func (p prometheusEventProcessorMetrics) eventLogged(event *v1.Event, detailedMetrics bool) {
+func (p prometheusEventProcessorMetrics) eventLogged(event *v1.Event) {
 	p.m.eventsTotal.WithLabelValues(event.Type).Inc()
-	if detailedMetrics && p.m.eventsByNamespaceTotal != nil {
-		p.m.eventsByNamespaceTotal.WithLabelValues(event.InvolvedObject.Namespace).Inc()
-		p.m.eventsByReasonTotal.WithLabelValues(event.Reason).Inc()
-		p.m.eventsByObjectKindTotal.WithLabelValues(event.InvolvedObject.Kind).Inc()
-	}
 	p.m.lastEventTimestamp.SetToCurrentTime()
 }
 
@@ -389,7 +361,6 @@ func newEventProcessor(
 	leaderStatus leaderStatusFunc,
 	excludeFilters eventFilters,
 	logger *log.Logger,
-	detailedMetrics bool,
 	metrics eventProcessorMetrics,
 	format eventFormatter,
 ) *eventProcessor {
@@ -397,14 +368,13 @@ func newEventProcessor(
 		format = flatEventLogEntryFor
 	}
 	return &eventProcessor{
-		leaderStatus:    leaderStatus,
-		excludeFilters:  excludeFilters,
-		logger:          logger,
-		detailedMetrics: detailedMetrics,
-		metrics:         metrics,
-		format:          format,
-		marshal:         json.Marshal,
-		now:             time.Now,
+		leaderStatus:   leaderStatus,
+		excludeFilters: excludeFilters,
+		logger:         logger,
+		metrics:        metrics,
+		format:         format,
+		marshal:        json.Marshal,
+		now:            time.Now,
 	}
 }
 
@@ -437,7 +407,7 @@ func (p *eventProcessor) process(obj interface{}) {
 	}
 
 	p.logger.Printf("%s\n", string(wrapper))
-	p.metrics.eventLogged(event, p.detailedMetrics)
+	p.metrics.eventLogged(event)
 	p.metrics.observeProcessingDuration(p.now().Sub(start))
 }
 
@@ -470,7 +440,6 @@ func run(ctx context.Context, args []string) error {
 	healthAddr := fs.String("health-addr", ":8080", "address for HTTP health endpoints")
 	metricsAddr := fs.String("metrics-addr", ":9090", "address for Prometheus metrics endpoint")
 	logFormat := fs.String("log-format", "flat", "event JSON log format: flat, legacy, or message")
-	enableDetailedMetrics := fs.Bool("enable-detailed-metrics", false, "enable high-cardinality metrics (events by namespace, reason, and object kind)")
 	var excludeFilters eventFilters
 	fs.Var(&excludeFilters, "exclude-filter", "exclude events matching all clauses in a rule; repeatable, format: field=value[,field=value] with fields namespace,kind,name,reason,type,reporting-component,reporting-controller,source-component. Values support shell-style wildcards (e.g. namespace=kube-*); patterns use Go path.Match syntax")
 	if err := fs.Parse(args); err != nil {
@@ -520,7 +489,7 @@ func run(ctx context.Context, args []string) error {
 	}
 
 	reg := prometheus.NewRegistry()
-	metrics := newAppMetrics(reg, *enableDetailedMetrics)
+	metrics := newAppMetrics(reg)
 	tracker := newHealthTracker()
 
 	healthMux := http.NewServeMux()
@@ -569,7 +538,6 @@ func run(ctx context.Context, args []string) error {
 		tracker.leaderStatus,
 		excludeFilters,
 		loggerEvent,
-		*enableDetailedMetrics,
 		prometheusEventProcessorMetrics{m: metrics},
 		format,
 	)
