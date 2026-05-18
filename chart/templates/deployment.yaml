@@ -55,9 +55,6 @@ spec:
             - -health-addr=:{{ .Values.healthPort.containerPort }}
             - -metrics-addr=:{{ .Values.metricsPort.containerPort }}
             - -log-format={{ .Values.logFormat }}
-            {{- if .Values.enableDetailedMetrics }}
-            - -enable-detailed-metrics
-            {{- end }}
             {{- range .Values.excludeFilters }}
             - -exclude-filter={{ include "kubernetes-event-logger.excludeFilter" . }}
             {{- end }}

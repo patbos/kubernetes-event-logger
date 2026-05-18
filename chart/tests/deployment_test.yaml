@@ -183,21 +183,6 @@ tests:
           path: spec.template.spec.containers[0].readinessProbe.httpGet.port
           value: 8080
 
-  # Optional flags
-  - it: should not include detailed metrics flag by default
-    asserts:
-      - notContains:
-          path: spec.template.spec.containers[0].args
-          content: -enable-detailed-metrics
-
-  - it: should include detailed metrics flag when enabled
-    set:
-      enableDetailedMetrics: true
-    asserts:
-      - contains:
-          path: spec.template.spec.containers[0].args
-          content: -enable-detailed-metrics
-
   - it: should pass log format arg
     set:
       logFormat: flat
