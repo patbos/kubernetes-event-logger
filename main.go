@@ -608,9 +608,6 @@ func eventLevel(eventType string) string {
 	if strings.EqualFold(eventType, "Warning") {
 		return "warn"
 	}
-	if strings.EqualFold(eventType, "Normal") {
-		return "info"
-	}
 	return "info"
 }
 
