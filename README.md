@@ -162,7 +162,7 @@ The binary uses a kubeconfig when `-kubeconfig` is non-empty. If `-kubeconfig` i
 | `-health-addr` | Address for HTTP health endpoints | `:8080` |
 | `-metrics-addr` | Address for Prometheus metrics endpoint | `:9090` |
 | `-log-format` | Event JSON log format: `flat`, `legacy`, or `message` | `flat` |
-| `-exclude-filter` | Exclude events matching all clauses in one rule; repeatable | none |
+| `-exclude-filter` | Exclude events matching all clauses in one rule; repeatable; supports [wildcards](#wildcard-matching) | none |
 
 `-exclude-filter` syntax:
 
@@ -332,6 +332,23 @@ Prometheus metrics are exposed at `/metrics` on the metrics port, which defaults
 
 Each log line is a JSON object. The default `-log-format=flat` emits selected event fields as top-level JSON fields.
 
+Example `-log-format=flat` output:
+
+```json
+{
+  "time": "2025-11-23T15:00:00Z",
+  "level": "info",
+  "namespace": "default",
+  "kind": "Pod",
+  "name": "example-pod",
+  "reason": "Started",
+  "type": "Normal",
+  "message": "Started container app",
+  "sourceComponent": "kubelet",
+  "count": 1
+}
+```
+
 `-log-format=legacy` emits the previous envelope with:
 
 - `time`: event timestamp chosen from `eventTime`, `series.lastObservedTime`, `lastTimestamp`, or `firstTimestamp` (in that order)
@@ -340,7 +357,7 @@ Each log line is a JSON object. The default `-log-format=flat` emits selected ev
 
 `-log-format=message` emits only `time`, `level`, and `message`.
 
-Example:
+Example `-log-format=legacy` output:
 
 ```json
 {
@@ -363,6 +380,16 @@ Example:
     "firstTimestamp": "2025-11-23T15:00:00Z",
     "lastTimestamp": "2025-11-23T15:00:00Z"
   }
+}
+```
+
+Example `-log-format=message` output:
+
+```json
+{
+  "time": "2025-11-23T15:00:00Z",
+  "level": "info",
+  "message": "Started container app"
 }
 ```
 
