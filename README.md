@@ -31,7 +31,7 @@ The binary is intended to run either:
 ## Requirements
 
 - Kubernetes `1.25+` (for stable PodDisruptionBudget API)
-- Go `1.26.2+` to build from source
+- Go `1.26.4+` to build from source
 - Access to a Kubernetes cluster
 - RBAC permission to read `events`
 - RBAC permission to manage a `Lease` in the deployment namespace for leader election
@@ -399,7 +399,7 @@ Example `-log-format=message` output:
 
 Install the following tools before building, testing, or linting:
 
-**Go** (1.26.2+)
+**Go** (1.26.4+)
 
 Follow the [official installation guide](https://go.dev/doc/install).
 
