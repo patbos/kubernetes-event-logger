@@ -72,7 +72,6 @@ jobs:
           tags: |
             type=ref,event=tag
             type=semver,pattern={{version}},value=${{ steps.version.outputs.VERSION }}
-            type=semver,pattern={{major}}.{{minor}},value=${{ steps.version.outputs.VERSION }}
             type=sha
 
       - name: Build and push multi-arch image
