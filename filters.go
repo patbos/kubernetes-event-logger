@@ -19,6 +19,57 @@ type eventFilter struct {
 	SourceComponent    string
 }
 
+// filterField describes a single filterable event field: its flag key
+// (plus optional aliases), where the pattern lives on eventFilter, and how
+// to read the corresponding value from an event. Match, String, and
+// parseEventFilter all iterate this table so a new field only needs to be
+// added here (and to the eventFilter struct).
+type filterField struct {
+	key        string
+	aliases    []string
+	pattern    func(f *eventFilter) *string
+	eventValue func(e *v1.Event) string
+}
+
+var filterFields = []filterField{
+	{
+		key:        "namespace",
+		pattern:    func(f *eventFilter) *string { return &f.Namespace },
+		eventValue: func(e *v1.Event) string { return e.InvolvedObject.Namespace },
+	},
+	{
+		key:        "kind",
+		pattern:    func(f *eventFilter) *string { return &f.Kind },
+		eventValue: func(e *v1.Event) string { return e.InvolvedObject.Kind },
+	},
+	{
+		key:        "name",
+		pattern:    func(f *eventFilter) *string { return &f.Name },
+		eventValue: func(e *v1.Event) string { return e.InvolvedObject.Name },
+	},
+	{
+		key:        "reason",
+		pattern:    func(f *eventFilter) *string { return &f.Reason },
+		eventValue: func(e *v1.Event) string { return e.Reason },
+	},
+	{
+		key:        "type",
+		pattern:    func(f *eventFilter) *string { return &f.Type },
+		eventValue: func(e *v1.Event) string { return e.Type },
+	},
+	{
+		key:        "reporting-component",
+		aliases:    []string{"reporting-controller"},
+		pattern:    func(f *eventFilter) *string { return &f.ReportingComponent },
+		eventValue: eventReportingComponent,
+	},
+	{
+		key:        "source-component",
+		pattern:    func(f *eventFilter) *string { return &f.SourceComponent },
+		eventValue: func(e *v1.Event) string { return e.Source.Component },
+	},
+}
+
 type eventFilters []eventFilter
 
 func (f *eventFilters) String() string {
@@ -48,26 +99,10 @@ func (f eventFilters) Match(event *v1.Event) bool {
 }
 
 func (f eventFilter) Match(event *v1.Event) bool {
-	if !matchClause(f.Namespace, event.InvolvedObject.Namespace) {
-		return false
-	}
-	if !matchClause(f.Kind, event.InvolvedObject.Kind) {
-		return false
-	}
-	if !matchClause(f.Name, event.InvolvedObject.Name) {
-		return false
-	}
-	if !matchClause(f.Reason, event.Reason) {
-		return false
-	}
-	if !matchClause(f.Type, event.Type) {
-		return false
-	}
-	if !matchClause(f.ReportingComponent, eventReportingComponent(event)) {
-		return false
-	}
-	if !matchClause(f.SourceComponent, event.Source.Component) {
-		return false
+	for _, field := range filterFields {
+		if !matchClause(*field.pattern(&f), field.eventValue(event)) {
+			return false
+		}
 	}
 	return true
 }
@@ -96,27 +131,11 @@ func hasWildcard(s string) bool {
 }
 
 func (f eventFilter) String() string {
-	parts := make([]string, 0, 7)
-	if f.Namespace != "" {
-		parts = append(parts, "namespace="+f.Namespace)
-	}
-	if f.Kind != "" {
-		parts = append(parts, "kind="+f.Kind)
-	}
-	if f.Name != "" {
-		parts = append(parts, "name="+f.Name)
-	}
-	if f.Reason != "" {
-		parts = append(parts, "reason="+f.Reason)
-	}
-	if f.Type != "" {
-		parts = append(parts, "type="+f.Type)
-	}
-	if f.ReportingComponent != "" {
-		parts = append(parts, "reporting-component="+f.ReportingComponent)
-	}
-	if f.SourceComponent != "" {
-		parts = append(parts, "source-component="+f.SourceComponent)
+	parts := make([]string, 0, len(filterFields))
+	for _, field := range filterFields {
+		if v := *field.pattern(&f); v != "" {
+			parts = append(parts, field.key+"="+v)
+		}
 	}
 	return strings.Join(parts, ",")
 }
@@ -147,24 +166,11 @@ func parseEventFilter(input string) (eventFilter, error) {
 			}
 		}
 
-		switch key {
-		case "namespace":
-			filter.Namespace = value
-		case "kind":
-			filter.Kind = value
-		case "name":
-			filter.Name = value
-		case "reason":
-			filter.Reason = value
-		case "type":
-			filter.Type = value
-		case "reporting-component", "reporting-controller":
-			filter.ReportingComponent = value
-		case "source-component":
-			filter.SourceComponent = value
-		default:
+		field := filterFieldByKey(key)
+		if field == nil {
 			return eventFilter{}, fmt.Errorf("unsupported filter field %q", key)
 		}
+		*field.pattern(&filter) = value
 	}
 
 	if filter == (eventFilter{}) {
@@ -172,6 +178,21 @@ func parseEventFilter(input string) (eventFilter, error) {
 	}
 
 	return filter, nil
+}
+
+func filterFieldByKey(key string) *filterField {
+	for i := range filterFields {
+		field := &filterFields[i]
+		if field.key == key {
+			return field
+		}
+		for _, alias := range field.aliases {
+			if alias == key {
+				return field
+			}
+		}
+	}
+	return nil
 }
 
 func eventReportingComponent(event *v1.Event) string {

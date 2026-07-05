@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -19,7 +20,6 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
-	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	v1 "k8s.io/api/core/v1"
@@ -36,31 +36,42 @@ import (
 
 var version = "dev"
 
-type eventLogEntry struct {
+// logMeta holds the fields shared by every log entry format. Embedding it
+// flattens time/level into the top-level JSON object.
+type logMeta struct {
 	Time  time.Time `json:"time"`
 	Level string    `json:"level"`
+}
+
+func logMetaFor(event *v1.Event) logMeta {
+	return logMeta{
+		Time:  eventTime(event),
+		Level: eventLevel(event.Type),
+	}
+}
+
+type eventLogEntry struct {
+	logMeta
 	Event *v1.Event `json:"event"`
 }
 
 type flatEventLogEntry struct {
-	Time                time.Time `json:"time"`
-	Level               string    `json:"level"`
-	Namespace           string    `json:"namespace,omitempty"`
-	Kind                string    `json:"kind,omitempty"`
-	Name                string    `json:"name,omitempty"`
-	Reason              string    `json:"reason,omitempty"`
-	Type                string    `json:"type,omitempty"`
-	Message             string    `json:"message,omitempty"`
-	ReportingComponent  string    `json:"reportingComponent,omitempty"`
-	ReportingController string    `json:"reportingController,omitempty"`
-	SourceComponent     string    `json:"sourceComponent,omitempty"`
-	Count               int32     `json:"count,omitempty"`
+	logMeta
+	Namespace           string `json:"namespace,omitempty"`
+	Kind                string `json:"kind,omitempty"`
+	Name                string `json:"name,omitempty"`
+	Reason              string `json:"reason,omitempty"`
+	Type                string `json:"type,omitempty"`
+	Message             string `json:"message,omitempty"`
+	ReportingComponent  string `json:"reportingComponent,omitempty"`
+	ReportingController string `json:"reportingController,omitempty"`
+	SourceComponent     string `json:"sourceComponent,omitempty"`
+	Count               int32  `json:"count,omitempty"`
 }
 
 type messageEventLogEntry struct {
-	Time    time.Time `json:"time"`
-	Level   string    `json:"level"`
-	Message string    `json:"message,omitempty"`
+	logMeta
+	Message string `json:"message,omitempty"`
 }
 
 type eventFormatter func(event *v1.Event) any
@@ -68,7 +79,7 @@ type eventFormatter func(event *v1.Event) any
 func eventLogFormatter(format string) (eventFormatter, error) {
 	switch format {
 	case "legacy":
-		return legacyEventLogEntry, nil
+		return legacyEventLogEntryFor, nil
 	case "flat":
 		return flatEventLogEntryFor, nil
 	case "message":
@@ -78,18 +89,16 @@ func eventLogFormatter(format string) (eventFormatter, error) {
 	}
 }
 
-func legacyEventLogEntry(event *v1.Event) any {
+func legacyEventLogEntryFor(event *v1.Event) any {
 	return eventLogEntry{
-		Time:  eventTime(event),
-		Level: eventLevel(event.Type),
-		Event: event,
+		logMeta: logMetaFor(event),
+		Event:   event,
 	}
 }
 
 func flatEventLogEntryFor(event *v1.Event) any {
 	return flatEventLogEntry{
-		Time:                eventTime(event),
-		Level:               eventLevel(event.Type),
+		logMeta:             logMetaFor(event),
 		Namespace:           event.InvolvedObject.Namespace,
 		Kind:                event.InvolvedObject.Kind,
 		Name:                event.InvolvedObject.Name,
@@ -105,8 +114,7 @@ func flatEventLogEntryFor(event *v1.Event) any {
 
 func messageEventLogEntryFor(event *v1.Event) any {
 	return messageEventLogEntry{
-		Time:    eventTime(event),
-		Level:   eventLevel(event.Type),
+		logMeta: logMetaFor(event),
 		Message: event.Message,
 	}
 }
@@ -231,6 +239,14 @@ func (h *healthTracker) leaderStatus() (bool, time.Time) {
 	return h.isLeader, h.leaderStartTime
 }
 
+type healthResponse struct {
+	Status        string  `json:"status"`
+	Leader        bool    `json:"leader"`
+	CacheSynced   bool    `json:"cache_synced"`
+	UptimeSeconds float64 `json:"uptime_seconds"`
+	Version       string  `json:"version"`
+}
+
 func (h *healthTracker) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	h.mu.RLock()
 	isLeader := h.isLeader
@@ -245,12 +261,12 @@ func (h *healthTracker) handleHealth(w http.ResponseWriter, _ *http.Request) {
 		statusCode = http.StatusServiceUnavailable
 	}
 
-	response := map[string]interface{}{
-		"status":         status,
-		"leader":         isLeader,
-		"cache_synced":   cacheSynced,
-		"uptime_seconds": uptime,
-		"version":        version,
+	response := healthResponse{
+		Status:        status,
+		Leader:        isLeader,
+		CacheSynced:   cacheSynced,
+		UptimeSeconds: uptime,
+		Version:       version,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -378,7 +394,7 @@ func newEventProcessor(
 	}
 }
 
-func (p *eventProcessor) process(obj interface{}) {
+func (p *eventProcessor) process(obj any) {
 	isLeader, leaderStartTime := p.leaderStatus()
 	if !isLeader {
 		return
@@ -399,14 +415,14 @@ func (p *eventProcessor) process(obj interface{}) {
 		return
 	}
 
-	wrapper, err := p.marshal(p.format(event))
+	entry, err := p.marshal(p.format(event))
 	if err != nil {
 		slog.Error("Failed to marshal event", "error", err)
 		p.metrics.eventFailed("marshal_error")
 		return
 	}
 
-	p.logger.Printf("%s\n", string(wrapper))
+	p.logger.Printf("%s", entry)
 	p.metrics.eventLogged(event)
 	p.metrics.observeProcessingDuration(p.now().Sub(start))
 }
@@ -495,42 +511,21 @@ func run(ctx context.Context, args []string) error {
 	healthMux := http.NewServeMux()
 	healthMux.HandleFunc("/healthz", tracker.handleHealth)
 	healthMux.HandleFunc("/readyz", tracker.handleHealth)
-	healthSrv := &http.Server{
-		Addr:              *healthAddr,
-		Handler:           healthMux,
-		ReadHeaderTimeout: 5 * time.Second,
-		ReadTimeout:       10 * time.Second,
-		WriteTimeout:      10 * time.Second,
-		IdleTimeout:       60 * time.Second,
-	}
-	go func() {
-		if err := healthSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			slog.Error("health server failed", "error", err)
-		}
-	}()
+	healthSrv := newHTTPServer(*healthAddr, healthMux)
+	startHTTPServer(healthSrv, "health")
+
 	metricsMux := http.NewServeMux()
 	metricsMux.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
-	metricsSrv := &http.Server{
-		Addr:              *metricsAddr,
-		Handler:           metricsMux,
-		ReadHeaderTimeout: 5 * time.Second,
-		ReadTimeout:       10 * time.Second,
-		WriteTimeout:      10 * time.Second,
-		IdleTimeout:       60 * time.Second,
-	}
-	go func() {
-		if err := metricsSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			slog.Error("metrics server failed", "error", err)
-		}
-	}()
+	metricsSrv := newHTTPServer(*metricsAddr, metricsMux)
+	startHTTPServer(metricsSrv, "metrics")
+
 	defer func() {
 		shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
-		if err := healthSrv.Shutdown(shutdownCtx); err != nil {
-			slog.Error("health server shutdown error", "error", err)
-		}
-		if err := metricsSrv.Shutdown(shutdownCtx); err != nil {
-			slog.Error("metrics server shutdown error", "error", err)
+		for name, srv := range map[string]*http.Server{"health": healthSrv, "metrics": metricsSrv} {
+			if err := srv.Shutdown(shutdownCtx); err != nil {
+				slog.Error(name+" server shutdown error", "error", err)
+			}
 		}
 	}()
 
@@ -549,7 +544,7 @@ func run(ctx context.Context, args []string) error {
 	eventInformer := factory.Core().V1().Events().Informer()
 	_, err = eventInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: eventProcessor.process,
-		UpdateFunc: func(_, newObj interface{}) {
+		UpdateFunc: func(_, newObj any) {
 			eventProcessor.process(newObj)
 		},
 	})
@@ -561,7 +556,7 @@ func run(ctx context.Context, args []string) error {
 	slog.Info("Waiting for informer caches to sync...")
 	syncStart := time.Now()
 	if ok := cache.WaitForCacheSync(ctx.Done(), eventInformer.HasSynced); !ok {
-		return fmt.Errorf("failed to wait for caches to sync")
+		return errors.New("failed to wait for caches to sync")
 	}
 	metrics.informerCacheSyncDuration.Set(time.Since(syncStart).Seconds())
 	tracker.setCacheSynced()
@@ -583,12 +578,35 @@ func run(ctx context.Context, args []string) error {
 	return nil
 }
 
+// newHTTPServer returns an *http.Server with the shared timeout settings
+// used by both the health and metrics endpoints.
+func newHTTPServer(addr string, handler http.Handler) *http.Server {
+	return &http.Server{
+		Addr:              addr,
+		Handler:           handler,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       10 * time.Second,
+		WriteTimeout:      10 * time.Second,
+		IdleTimeout:       60 * time.Second,
+	}
+}
+
+// startHTTPServer serves srv in a background goroutine, logging any error
+// other than the expected http.ErrServerClosed from a graceful shutdown.
+func startHTTPServer(srv *http.Server, name string) {
+	go func() {
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			slog.Error(name+" server failed", "error", err)
+		}
+	}()
+}
+
 func leaderElectionIdentity() (string, error) {
 	hostname, err := os.Hostname()
 	if err != nil {
 		return "", fmt.Errorf("failed to get hostname for leader election identity: %w", err)
 	}
-	return hostname + "_" + uuid.NewString(), nil
+	return hostname + "_" + rand.Text(), nil
 }
 
 func eventTime(event *v1.Event) time.Time {

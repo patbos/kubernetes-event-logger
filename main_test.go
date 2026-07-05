@@ -17,7 +17,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -64,7 +63,7 @@ func newTestEventProcessor(
 		excludeFilters: excludeFilters,
 		logger:         log.New(output, "", 0),
 		metrics:        metrics,
-		format:         legacyEventLogEntry,
+		format:         legacyEventLogEntryFor,
 		marshal:        json.Marshal,
 		now: func() time.Time {
 			return time.Unix(100, 0).UTC()
@@ -1935,9 +1934,8 @@ func TestEventLogEntryFormat(t *testing.T) {
 	}
 
 	entry := eventLogEntry{
-		Time:  now,
-		Level: "info",
-		Event: event,
+		logMeta: logMeta{Time: now, Level: "info"},
+		Event:   event,
 	}
 
 	data, err := json.Marshal(entry)
@@ -2330,7 +2328,7 @@ func TestLeaderCallbacksOnNewLeader(t *testing.T) {
 	}
 }
 
-func TestLeaderElectionIdentityUsesHostnameAndUUID(t *testing.T) {
+func TestLeaderElectionIdentityUsesHostnameAndRandomSuffix(t *testing.T) {
 	hostname, err := os.Hostname()
 	if err != nil {
 		t.Fatalf("os.Hostname() error = %v", err)
@@ -2345,8 +2343,17 @@ func TestLeaderElectionIdentityUsesHostnameAndUUID(t *testing.T) {
 	if !strings.HasPrefix(id, prefix) {
 		t.Fatalf("leaderElectionIdentity() = %q, want prefix %q", id, prefix)
 	}
-	if _, err := uuid.Parse(strings.TrimPrefix(id, prefix)); err != nil {
-		t.Fatalf("leaderElectionIdentity() UUID suffix is invalid: %v", err)
+	suffix := strings.TrimPrefix(id, prefix)
+	if suffix == "" {
+		t.Fatal("leaderElectionIdentity() random suffix is empty")
+	}
+
+	other, err := leaderElectionIdentity()
+	if err != nil {
+		t.Fatalf("leaderElectionIdentity() error = %v", err)
+	}
+	if id == other {
+		t.Fatalf("leaderElectionIdentity() returned identical identities %q; suffix must be random", id)
 	}
 }
 
