@@ -36,9 +36,6 @@ linters:
       check-blank: false
 
     gosec:
-      excludes:
-        - G204  # exec subprocess with dynamic args
-        - G306  # file mode is not specified
       severity: medium
 
     revive:

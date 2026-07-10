@@ -5,3 +5,17 @@
 {{- end }}
 
 Logs are written as JSON to stdout. Collect them with your preferred log aggregation stack.
+{{- if not .Values.networkPolicy.enabled }}
+
+NOTE: networkPolicy.enabled is false. For defense-in-depth in production clusters
+with network policy support (Calico, Cilium, etc), consider enabling it:
+
+  networkPolicy:
+    enabled: true
+    egress:
+      kubernetesAPI:
+        ipBlocks:
+          - cidr: <kubernetes-api-clusterip>/32
+
+See chart/values.yaml for the full networkPolicy configuration surface.
+{{- end }}

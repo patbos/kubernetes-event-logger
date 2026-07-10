@@ -308,6 +308,16 @@ kubectl label namespace <namespace> \
   pod-security.kubernetes.io/warn=restricted
 ```
 
+## Sensitive Data in Logs
+
+Kubernetes event messages can contain operationally sensitive details, such as object names, image references, node names, and error strings emitted by controllers. This tool logs event content as-is to stdout by design.
+
+Before shipping these logs to a third-party sink (hosted log aggregation, SIEM, etc), review what your cluster emits and consider:
+
+- using `-exclude-filter` rules (or `excludeFilters` in the Helm chart) to drop namespaces or event types you do not want to leave the cluster, for example `-exclude-filter=namespace=kube-system`
+- using `-log-format=message` to log only the event message without object metadata
+- applying redaction or filtering in your log pipeline before forwarding
+
 ## HTTP Endpoints
 
 The process listens on separate ports for health and metrics. Health endpoints are not exposed through the chart Service by default; the Service targets only the metrics port for Prometheus scraping.
