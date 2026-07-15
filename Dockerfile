@@ -12,6 +12,7 @@ ARG VERSION=dev
 
 RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -ldflags "-X main.version=${VERSION}" -o kubernetes-event-logger .
 
+# Follow the distroless static:nonroot tag, while pinning the resolved digest for reproducible builds.
 FROM gcr.io/distroless/static:nonroot@sha256:f7f8f729987ad0fdf6b05eeeae94b26e6a0f613bdf46feea7fc40f7bd72953e6
 
 WORKDIR /
