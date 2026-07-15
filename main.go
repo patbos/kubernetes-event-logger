@@ -488,9 +488,9 @@ func run(ctx context.Context, args []string) error {
 		return err
 	}
 
-	namespace := os.Getenv("POD_NAMESPACE")
-	if namespace == "" {
-		namespace = "default"
+	namespace, err := leaseNamespace(serviceAccountNamespaceFile)
+	if err != nil {
+		return err
 	}
 
 	lock := &resourcelock.LeaseLock{
@@ -599,6 +599,33 @@ func startHTTPServer(srv *http.Server, name string) {
 			slog.Error(name+" server failed", "error", err)
 		}
 	}()
+}
+
+// serviceAccountNamespaceFile is mounted into every pod that has a service
+// account token projected; it names the pod's own namespace.
+const serviceAccountNamespaceFile = "/var/run/secrets/kubernetes.io/serviceaccount/namespace"
+
+// leaseNamespace resolves the namespace for the leader election Lease:
+// POD_NAMESPACE first, then the mounted service account namespace file.
+// When neither is available the behavior depends on where we run: in a
+// cluster (KUBERNETES_SERVICE_HOST set) a silent fall back to "default"
+// would create the lease in a namespace the RBAC role almost certainly
+// does not cover and crash-loop with a misleading permission error, so
+// fail fast with an actionable message instead. Outside a cluster (local
+// development against a kubeconfig) "default" remains the fallback.
+func leaseNamespace(namespaceFile string) (string, error) {
+	if ns := os.Getenv("POD_NAMESPACE"); ns != "" {
+		return ns, nil
+	}
+	if data, err := os.ReadFile(namespaceFile); err == nil { // #nosec G304 -- fixed in-cluster path; parameterized for tests only
+		if ns := strings.TrimSpace(string(data)); ns != "" {
+			return ns, nil
+		}
+	}
+	if os.Getenv("KUBERNETES_SERVICE_HOST") != "" {
+		return "", errors.New("cannot determine lease namespace: POD_NAMESPACE is not set and the service account namespace file is unavailable; set POD_NAMESPACE via the downward API")
+	}
+	return "default", nil
 }
 
 func leaderElectionIdentity() (string, error) {
