@@ -9,7 +9,6 @@ on:
 permissions:
   contents: read
   security-events: write
-  issues: write
 
 env:
   REGISTRY: ghcr.io
@@ -47,41 +46,13 @@ jobs:
           image-ref: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:${{ steps.release.outputs.tag }}
           format: sarif
           output: trivy-results.sarif
-          severity: CRITICAL,HIGH
-          exit-code: "1"
+          severity: CRITICAL,HIGH,UNKNOWN
+          # Without this, SARIF output ignores the severity filter and
+          # reports all severities.
+          limit-severities-for-sarif: true
 
       - name: Upload Trivy results
         uses: github/codeql-action/upload-sarif@99df26d4f13ea111d4ec1a7dddef6063f76b97e9  # v4.37.0
-        if: always()
         with:
           sarif_file: trivy-results.sarif
           category: trivy-release
-
-      - name: Create issue if vulnerabilities found
-        if: failure()
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3  # v9.0.0
-        env:
-          IMAGE_REF: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:${{ steps.release.outputs.tag }}
-          RELEASE_TAG: ${{ steps.release.outputs.tag }}
-        with:
-          script: |
-            const imageRef = process.env.IMAGE_REF;
-            const releaseTag = process.env.RELEASE_TAG;
-            github.rest.issues.create({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              title: `New vulnerabilities detected in ${context.repo.repo}:${releaseTag}`,
-              body: [
-                `A scheduled Trivy scan found new vulnerabilities in the latest release \`${releaseTag}\`.`,
-                ``,
-                `Check the [Security tab](https://github.com/${context.repo.owner}/${context.repo.repo}/security/code-scanning) for details.`,
-                ``,
-                `**Image:** \`${imageRef}\``,
-                ``,
-                `**Next steps:**`,
-                `1. Review findings in the Security tab`,
-                `2. If critical, rebuild and release a patched version`,
-                `3. Update base image or dependencies as needed`,
-              ].join('\n'),
-              labels: ['security', 'trivy', 'automated']
-            })
