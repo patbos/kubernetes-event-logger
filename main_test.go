@@ -2222,11 +2222,11 @@ func TestLeaderCallbacksOnStoppedLeadingAfterLeading(t *testing.T) {
 	}
 
 	output := logs.String()
-	if !strings.Contains(output, `"msg":"Shutting down event processing."`) {
-		t.Errorf("expected shutdown log when wasLeader=true, got: %s", output)
+	if !strings.Contains(output, `"msg":"Lost leadership. Shutting down event processing."`) {
+		t.Errorf("expected lost-leadership shutdown log when wasLeader=true, got: %s", output)
 	}
-	if !strings.Contains(output, `"msg":"Lost leadership, entering standby mode."`) {
-		t.Errorf("expected lost-leadership log, got: %s", output)
+	if strings.Contains(output, "standby") {
+		t.Errorf("log must not claim standby mode; the process exits after losing leadership: %s", output)
 	}
 }
 
@@ -2254,11 +2254,11 @@ func TestLeaderCallbacksOnStoppedLeadingWithoutLeading(t *testing.T) {
 	}
 
 	output := logs.String()
-	if strings.Contains(output, `"msg":"Shutting down event processing."`) {
+	if strings.Contains(output, "Shutting down event processing.") {
 		t.Errorf("shutdown log should NOT appear when never became leader, got: %s", output)
 	}
-	if !strings.Contains(output, `"msg":"Lost leadership, entering standby mode."`) {
-		t.Errorf("lost-leadership log should still appear, got: %s", output)
+	if !strings.Contains(output, `"msg":"Leader election stopped before leadership was acquired."`) {
+		t.Errorf("expected stopped-before-acquire log, got: %s", output)
 	}
 }
 
@@ -2285,8 +2285,7 @@ func TestLeaderCallbacksFullCycle(t *testing.T) {
 	output := logs.String()
 	for _, want := range []string{
 		`"msg":"Became leader. Starting to process events."`,
-		`"msg":"Shutting down event processing."`,
-		`"msg":"Lost leadership, entering standby mode."`,
+		`"msg":"Lost leadership. Shutting down event processing."`,
 	} {
 		if !strings.Contains(output, want) {
 			t.Errorf("missing log line %q in output: %s", want, output)
@@ -2383,4 +2382,24 @@ func TestLeaderCallbacksConcurrentRaceFree(t *testing.T) {
 		}()
 		wg.Wait()
 	}
+}
+
+func TestLeaderElectionExitError(t *testing.T) {
+	t.Run("cancelled context is a graceful shutdown", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		if err := leaderElectionExitError(ctx); err != nil {
+			t.Errorf("leaderElectionExitError() = %v, want nil for cancelled context", err)
+		}
+	})
+
+	t.Run("live context means the lease was lost", func(t *testing.T) {
+		err := leaderElectionExitError(context.Background())
+		if err == nil {
+			t.Fatal("leaderElectionExitError() = nil, want error when context is not cancelled")
+		}
+		if !strings.Contains(err.Error(), "leadership lease lost") {
+			t.Errorf("error = %q, want it to mention the lost lease", err.Error())
+		}
+	})
 }
