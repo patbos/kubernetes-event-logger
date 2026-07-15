@@ -2384,3 +2384,63 @@ func TestLeaderCallbacksConcurrentRaceFree(t *testing.T) {
 		wg.Wait()
 	}
 }
+
+func TestResourceVersionChanged(t *testing.T) {
+	eventWithVersion := func(rv string) *v1.Event {
+		return &v1.Event{
+			ObjectMeta: metav1.ObjectMeta{Name: "test-event", ResourceVersion: rv},
+		}
+	}
+
+	tests := []struct {
+		name   string
+		oldObj any
+		newObj any
+		want   bool
+	}{
+		{
+			name:   "same resource version is a relist redelivery",
+			oldObj: eventWithVersion("100"),
+			newObj: eventWithVersion("100"),
+			want:   false,
+		},
+		{
+			name:   "different resource version is a real update",
+			oldObj: eventWithVersion("100"),
+			newObj: eventWithVersion("101"),
+			want:   true,
+		},
+		{
+			name:   "empty resource versions are treated as unchanged",
+			oldObj: eventWithVersion(""),
+			newObj: eventWithVersion(""),
+			want:   false,
+		},
+		{
+			name:   "non-event old object passes through",
+			oldObj: "not-an-event",
+			newObj: eventWithVersion("100"),
+			want:   true,
+		},
+		{
+			name:   "non-event new object passes through",
+			oldObj: eventWithVersion("100"),
+			newObj: "not-an-event",
+			want:   true,
+		},
+		{
+			name:   "nil objects pass through",
+			oldObj: nil,
+			newObj: nil,
+			want:   true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := resourceVersionChanged(tc.oldObj, tc.newObj); got != tc.want {
+				t.Errorf("resourceVersionChanged() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
