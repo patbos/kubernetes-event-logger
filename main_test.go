@@ -263,6 +263,12 @@ func TestIsHistorical(t *testing.T) {
 			startTime: now,
 			expected:  true,
 		},
+		{
+			name:      "event without any timestamp is not historical",
+			event:     &v1.Event{},
+			startTime: now,
+			expected:  false,
+		},
 	}
 
 	for _, tc := range testCases {
@@ -626,6 +632,37 @@ func TestEventProcessorFiltersHistoricalEvents(t *testing.T) {
 	}
 	if output.Len() != 0 {
 		t.Fatalf("log output length = %d, want 0", output.Len())
+	}
+}
+
+func TestEventProcessorLogsEventsWithoutTimestamps(t *testing.T) {
+	// Regression test: an event with no timestamp at all yields a zero
+	// eventTime, which always compares as before the leader start time.
+	// Such events must be logged, not silently dropped as historical.
+	var output bytes.Buffer
+	metrics := newFakeEventProcessorMetrics()
+	leaderStart := time.Unix(100, 0).UTC()
+	processor := newTestEventProcessor(
+		func() (bool, time.Time) { return true, leaderStart },
+		nil,
+		metrics,
+		&output,
+	)
+
+	processor.process(&v1.Event{
+		Type:    "Warning",
+		Reason:  "NoTimestamps",
+		Message: "event without any timestamp fields",
+	})
+
+	if metrics.filtered["historical"] != 0 {
+		t.Fatalf("historical filtered count = %d, want 0", metrics.filtered["historical"])
+	}
+	if len(metrics.loggedEvents) != 1 {
+		t.Fatalf("logged events = %d, want 1", len(metrics.loggedEvents))
+	}
+	if output.Len() == 0 {
+		t.Fatal("log output is empty, want the event to be logged")
 	}
 }
 
