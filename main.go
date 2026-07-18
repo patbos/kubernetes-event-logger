@@ -629,8 +629,18 @@ func eventLevel(eventType string) string {
 	return "info"
 }
 
+// isHistorical reports whether the event predates leadership start and was
+// therefore already handled (or intentionally skipped) before this instance
+// became leader. Events carrying no timestamp at all cannot be placed on
+// that timeline; they are treated as current so they get logged instead of
+// being silently dropped, because a zero time would otherwise always
+// compare as before startTime.
 func isHistorical(event *v1.Event, startTime time.Time) bool {
-	return !eventTime(event).UTC().After(startTime)
+	t := eventTime(event)
+	if t.IsZero() {
+		return false
+	}
+	return !t.UTC().After(startTime)
 }
 
 func fileExists(path string) bool {
