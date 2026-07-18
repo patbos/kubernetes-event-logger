@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -2419,5 +2420,83 @@ func TestLeaderCallbacksConcurrentRaceFree(t *testing.T) {
 			callbacks.OnStoppedLeading()
 		}()
 		wg.Wait()
+	}
+}
+
+func TestLeaseNamespace(t *testing.T) {
+	// writeNamespaceFile returns the path of a namespace file fixture
+	// containing content, mimicking the projected service account file.
+	writeNamespaceFile := func(t *testing.T, content string) string {
+		t.Helper()
+		path := filepath.Join(t.TempDir(), "namespace")
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatalf("failed to write namespace fixture: %v", err)
+		}
+		return path
+	}
+	missingFile := filepath.Join(t.TempDir(), "does-not-exist")
+
+	tests := []struct {
+		name          string
+		podNamespace  string
+		serviceHost   string
+		namespaceFile string
+		want          string
+		wantErr       bool
+	}{
+		{
+			name:          "POD_NAMESPACE wins",
+			podNamespace:  "event-logging",
+			serviceHost:   "10.0.0.1",
+			namespaceFile: missingFile,
+			want:          "event-logging",
+		},
+		{
+			name:          "falls back to service account namespace file",
+			namespaceFile: writeNamespaceFile(t, "monitoring\n"),
+			serviceHost:   "10.0.0.1",
+			want:          "monitoring",
+		},
+		{
+			name:          "in-cluster without namespace information fails fast",
+			serviceHost:   "10.0.0.1",
+			namespaceFile: missingFile,
+			wantErr:       true,
+		},
+		{
+			name:          "in-cluster with empty namespace file fails fast",
+			serviceHost:   "10.0.0.1",
+			namespaceFile: writeNamespaceFile(t, "  \n"),
+			wantErr:       true,
+		},
+		{
+			name:          "out-of-cluster falls back to default",
+			namespaceFile: missingFile,
+			want:          "default",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("POD_NAMESPACE", tc.podNamespace)
+			t.Setenv("KUBERNETES_SERVICE_HOST", tc.serviceHost)
+
+			got, err := leaseNamespace(tc.namespaceFile)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("leaseNamespace() = %q, want error", got)
+				}
+				if !strings.Contains(err.Error(), "POD_NAMESPACE") {
+					t.Errorf("error = %q, want it to mention POD_NAMESPACE", err.Error())
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("leaseNamespace() error = %v, want nil", err)
+			}
+			if got != tc.want {
+				t.Errorf("leaseNamespace() = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
