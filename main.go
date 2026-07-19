@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -512,13 +513,14 @@ func run(ctx context.Context, args []string) error {
 	healthMux.HandleFunc("/healthz", tracker.handleHealth)
 	healthMux.HandleFunc("/readyz", tracker.handleHealth)
 	healthSrv := newHTTPServer(*healthAddr, healthMux)
-	startHTTPServer(healthSrv, "health")
 
 	metricsMux := http.NewServeMux()
 	metricsMux.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
 	metricsSrv := newHTTPServer(*metricsAddr, metricsMux)
-	startHTTPServer(metricsSrv, "metrics")
 
+	// Registered before the servers start so a partial startup (health
+	// listening, metrics failing) still shuts down cleanly. Shutdown on a
+	// server that never started is a no-op.
 	defer func() {
 		shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
@@ -528,6 +530,13 @@ func run(ctx context.Context, args []string) error {
 			}
 		}
 	}()
+
+	if err := startHTTPServer(ctx, healthSrv, "health"); err != nil {
+		return err
+	}
+	if err := startHTTPServer(ctx, metricsSrv, "metrics"); err != nil {
+		return err
+	}
 
 	eventProcessor := newEventProcessor(
 		tracker.leaderStatus,
@@ -591,14 +600,22 @@ func newHTTPServer(addr string, handler http.Handler) *http.Server {
 	}
 }
 
-// startHTTPServer serves srv in a background goroutine, logging any error
-// other than the expected http.ErrServerClosed from a graceful shutdown.
-func startHTTPServer(srv *http.Server, name string) {
+// startHTTPServer binds srv's listener synchronously so configuration
+// problems (port already in use, bad address) fail startup instead of
+// leaving the process running without health or metrics endpoints. The
+// server is then served in a background goroutine, logging any error other
+// than the expected http.ErrServerClosed from a graceful shutdown.
+func startHTTPServer(ctx context.Context, srv *http.Server, name string) error {
+	listener, err := (&net.ListenConfig{}).Listen(ctx, "tcp", srv.Addr)
+	if err != nil {
+		return fmt.Errorf("%s server failed to listen on %s: %w", name, srv.Addr, err)
+	}
 	go func() {
-		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		if err := srv.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			slog.Error(name+" server failed", "error", err)
 		}
 	}()
+	return nil
 }
 
 func leaderElectionIdentity() (string, error) {
