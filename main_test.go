@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -262,6 +263,12 @@ func TestIsHistorical(t *testing.T) {
 			},
 			startTime: now,
 			expected:  true,
+		},
+		{
+			name:      "event without any timestamp is not historical",
+			event:     &v1.Event{},
+			startTime: now,
+			expected:  false,
 		},
 	}
 
@@ -626,6 +633,37 @@ func TestEventProcessorFiltersHistoricalEvents(t *testing.T) {
 	}
 	if output.Len() != 0 {
 		t.Fatalf("log output length = %d, want 0", output.Len())
+	}
+}
+
+func TestEventProcessorLogsEventsWithoutTimestamps(t *testing.T) {
+	// Regression test: an event with no timestamp at all yields a zero
+	// eventTime, which always compares as before the leader start time.
+	// Such events must be logged, not silently dropped as historical.
+	var output bytes.Buffer
+	metrics := newFakeEventProcessorMetrics()
+	leaderStart := time.Unix(100, 0).UTC()
+	processor := newTestEventProcessor(
+		func() (bool, time.Time) { return true, leaderStart },
+		nil,
+		metrics,
+		&output,
+	)
+
+	processor.process(&v1.Event{
+		Type:    "Warning",
+		Reason:  "NoTimestamps",
+		Message: "event without any timestamp fields",
+	})
+
+	if metrics.filtered["historical"] != 0 {
+		t.Fatalf("historical filtered count = %d, want 0", metrics.filtered["historical"])
+	}
+	if len(metrics.loggedEvents) != 1 {
+		t.Fatalf("logged events = %d, want 1", len(metrics.loggedEvents))
+	}
+	if output.Len() == 0 {
+		t.Fatal("log output is empty, want the event to be logged")
 	}
 }
 
@@ -2402,4 +2440,39 @@ func TestLeaderElectionExitError(t *testing.T) {
 			t.Errorf("error = %q, want it to mention the lost lease", err.Error())
 		}
 	})
+}
+
+func TestStartHTTPServerServesOnFreePort(t *testing.T) {
+	srv := newHTTPServer("127.0.0.1:0", http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	if err := startHTTPServer(t.Context(), srv, "test"); err != nil {
+		t.Fatalf("startHTTPServer() error = %v, want nil", err)
+	}
+	t.Cleanup(func() {
+		if err := srv.Shutdown(context.Background()); err != nil {
+			t.Errorf("Shutdown() error = %v", err)
+		}
+	})
+}
+
+func TestStartHTTPServerFailsWhenPortInUse(t *testing.T) {
+	listener, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("Listen() error = %v", err)
+	}
+	t.Cleanup(func() {
+		if err := listener.Close(); err != nil {
+			t.Errorf("listener.Close() error = %v", err)
+		}
+	})
+
+	srv := newHTTPServer(listener.Addr().String(), http.NewServeMux())
+	err = startHTTPServer(t.Context(), srv, "test")
+	if err == nil {
+		t.Fatal("startHTTPServer() = nil, want error when the port is already in use")
+	}
+	if !strings.Contains(err.Error(), "test server failed to listen") {
+		t.Errorf("error = %q, want it to identify the failing server and listen failure", err.Error())
+	}
 }
