@@ -185,13 +185,19 @@ func (c *leaderCallbacks) OnStartedLeading(_ context.Context) {
 	slog.Info("Became leader. Starting to process events.", "start_time", startTime.Format(time.RFC3339))
 }
 
+// OnStoppedLeading is invoked when this instance stops leading, either
+// because the lease was lost or because the context was cancelled during
+// shutdown. The process does not re-enter the election afterwards:
+// leaderelection.RunOrDie returns and run() exits, relying on the
+// container restart policy to bring up a fresh candidate.
 func (c *leaderCallbacks) OnStoppedLeading() {
 	c.metrics.setLeaderGauge(0)
 	c.tracker.setLeader(false, time.Time{})
 	if c.wasLeader.Load() {
-		slog.Info("Shutting down event processing.")
+		slog.Info("Lost leadership. Shutting down event processing.")
+		return
 	}
-	slog.Info("Lost leadership, entering standby mode.")
+	slog.Info("Leader election stopped before leadership was acquired.")
 }
 
 // OnNewLeader is invoked by client-go in a goroutine but only ever from a
@@ -584,7 +590,20 @@ func run(ctx context.Context, args []string) error {
 			OnNewLeader:      callbacks.OnNewLeader,
 		},
 	})
-	return nil
+	return leaderElectionExitError(ctx)
+}
+
+// leaderElectionExitError translates the state after RunOrDie returns into
+// the process exit result. RunOrDie returns either because the context was
+// cancelled (graceful shutdown, not an error) or because the leadership
+// lease was lost mid-flight. The latter is abnormal: events are dropped
+// until a new leader takes over, so exit non-zero to make the restart
+// visible instead of silently returning success.
+func leaderElectionExitError(ctx context.Context) error {
+	if ctx.Err() != nil {
+		return nil
+	}
+	return errors.New("leadership lease lost, exiting so the restart policy can start a fresh candidate")
 }
 
 // newHTTPServer returns an *http.Server with the shared timeout settings
