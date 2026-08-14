@@ -553,7 +553,10 @@ func run(ctx context.Context, args []string) error {
 	eventInformer := factory.Core().V1().Events().Informer()
 	_, err = eventInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: eventProcessor.process,
-		UpdateFunc: func(_, newObj any) {
+		UpdateFunc: func(oldObj, newObj any) {
+			if !resourceVersionChanged(oldObj, newObj) {
+				return
+			}
 			eventProcessor.process(newObj)
 		},
 	})
@@ -644,6 +647,21 @@ func eventLevel(eventType string) string {
 		return "warn"
 	}
 	return "info"
+}
+
+// resourceVersionChanged reports whether newObj is a different version of
+// oldObj. When the informer relists (watch connection drop, "too old
+// resource version"), client-go redelivers every cached object to
+// UpdateFunc with an unchanged ResourceVersion; those redeliveries must
+// not be logged again. Objects that are not *v1.Event are passed through
+// so the processor keeps its existing type handling.
+func resourceVersionChanged(oldObj, newObj any) bool {
+	oldEvent, okOld := oldObj.(*v1.Event)
+	newEvent, okNew := newObj.(*v1.Event)
+	if !okOld || !okNew {
+		return true
+	}
+	return oldEvent.ResourceVersion != newEvent.ResourceVersion
 }
 
 // isHistorical reports whether the event predates leadership start and was
