@@ -2205,7 +2205,7 @@ func TestLeaderCallbacksOnStartedLeading(t *testing.T) {
 	metrics := &fakeLeaderCallbackMetrics{}
 	fixedNow := time.Unix(1700000000, 0).UTC()
 
-	callbacks := newLeaderCallbacks(tracker, metrics, "test-id")
+	callbacks := newLeaderCallbacks(context.Background(), tracker, metrics, "test-id")
 	callbacks.now = func() time.Time { return fixedNow }
 
 	callbacks.OnStartedLeading(context.Background())
@@ -2243,7 +2243,7 @@ func TestLeaderCallbacksOnStoppedLeadingAfterLeading(t *testing.T) {
 	tracker := newHealthTracker()
 	metrics := &fakeLeaderCallbackMetrics{}
 
-	callbacks := newLeaderCallbacks(tracker, metrics, "test-id")
+	callbacks := newLeaderCallbacks(context.Background(), tracker, metrics, "test-id")
 	callbacks.OnStartedLeading(context.Background())
 	logs.Reset()
 
@@ -2268,6 +2268,27 @@ func TestLeaderCallbacksOnStoppedLeadingAfterLeading(t *testing.T) {
 	}
 }
 
+func TestLeaderCallbacksOnStoppedLeadingDuringGracefulShutdown(t *testing.T) {
+	logs := captureSlog(t)
+	tracker := newHealthTracker()
+	metrics := &fakeLeaderCallbackMetrics{}
+	ctx, cancel := context.WithCancel(context.Background())
+	callbacks := newLeaderCallbacks(ctx, tracker, metrics, "test-id")
+
+	callbacks.OnStartedLeading(context.Background())
+	logs.Reset()
+	cancel()
+	callbacks.OnStoppedLeading()
+
+	output := logs.String()
+	if !strings.Contains(output, `"msg":"Shutting down event processing."`) {
+		t.Errorf("expected graceful-shutdown log when context is cancelled, got: %s", output)
+	}
+	if strings.Contains(output, "Lost leadership.") {
+		t.Errorf("graceful shutdown must not claim leadership was lost: %s", output)
+	}
+}
+
 func TestLeaderCallbacksOnStoppedLeadingWithoutLeading(t *testing.T) {
 	// Standby path: OnStoppedLeading is invoked by client-go even when
 	// OnStartedLeading never ran (ctx canceled during acquire). The
@@ -2276,7 +2297,7 @@ func TestLeaderCallbacksOnStoppedLeadingWithoutLeading(t *testing.T) {
 	tracker := newHealthTracker()
 	metrics := &fakeLeaderCallbackMetrics{}
 
-	callbacks := newLeaderCallbacks(tracker, metrics, "test-id")
+	callbacks := newLeaderCallbacks(context.Background(), tracker, metrics, "test-id")
 
 	callbacks.OnStoppedLeading()
 
@@ -2302,15 +2323,15 @@ func TestLeaderCallbacksOnStoppedLeadingWithoutLeading(t *testing.T) {
 
 func TestLeaderCallbacksFullCycle(t *testing.T) {
 	// Verifies the start-then-stop sequence as it would be invoked by
-	// client-go during a normal leadership term followed by graceful
-	// shutdown. This is the regression test for the previous racy wait()
+	// client-go during a normal leadership term followed by lease loss.
+	// This is the regression test for the previous racy wait()
 	// implementation: we now rely solely on the synchronous OnStoppedLeading
 	// path to emit the shutdown log, with no goroutine coordination.
 	logs := captureSlog(t)
 	tracker := newHealthTracker()
 	metrics := &fakeLeaderCallbackMetrics{}
 
-	callbacks := newLeaderCallbacks(tracker, metrics, "test-id")
+	callbacks := newLeaderCallbacks(context.Background(), tracker, metrics, "test-id")
 
 	callbacks.OnStartedLeading(context.Background())
 	callbacks.OnStoppedLeading()
@@ -2335,7 +2356,7 @@ func TestLeaderCallbacksOnNewLeader(t *testing.T) {
 	tracker := newHealthTracker()
 	metrics := &fakeLeaderCallbackMetrics{}
 
-	callbacks := newLeaderCallbacks(tracker, metrics, "self-id")
+	callbacks := newLeaderCallbacks(context.Background(), tracker, metrics, "self-id")
 
 	logs := captureSlog(t)
 	callbacks.OnNewLeader("self-id") // self - should not log
@@ -2406,7 +2427,7 @@ func TestLeaderCallbacksConcurrentRaceFree(t *testing.T) {
 	for i := 0; i < 100; i++ {
 		tracker := newHealthTracker()
 		metrics := &fakeLeaderCallbackMetrics{}
-		callbacks := newLeaderCallbacks(tracker, metrics, "test-id")
+		callbacks := newLeaderCallbacks(context.Background(), tracker, metrics, "test-id")
 
 		var wg sync.WaitGroup
 		wg.Add(2)

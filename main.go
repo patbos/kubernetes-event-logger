@@ -159,20 +159,22 @@ type leaderCallbackMetrics interface {
 //     callbacks may race on machines where OnStartedLeading is scheduled
 //     after OnStoppedLeading begins running.
 type leaderCallbacks struct {
-	tracker    *healthTracker
-	metrics    leaderCallbackMetrics
-	identity   string
-	now        func() time.Time
-	wasLeader  atomic.Bool
-	lastLeader string
+	shutdownCtx context.Context
+	tracker     *healthTracker
+	metrics     leaderCallbackMetrics
+	identity    string
+	now         func() time.Time
+	wasLeader   atomic.Bool
+	lastLeader  string
 }
 
-func newLeaderCallbacks(tracker *healthTracker, metrics leaderCallbackMetrics, identity string) *leaderCallbacks {
+func newLeaderCallbacks(shutdownCtx context.Context, tracker *healthTracker, metrics leaderCallbackMetrics, identity string) *leaderCallbacks {
 	return &leaderCallbacks{
-		tracker:  tracker,
-		metrics:  metrics,
-		identity: identity,
-		now:      func() time.Time { return time.Now().UTC() },
+		shutdownCtx: shutdownCtx,
+		tracker:     tracker,
+		metrics:     metrics,
+		identity:    identity,
+		now:         func() time.Time { return time.Now().UTC() },
 	}
 }
 
@@ -187,13 +189,16 @@ func (c *leaderCallbacks) OnStartedLeading(_ context.Context) {
 
 // OnStoppedLeading is invoked when this instance stops leading, either
 // because the lease was lost or because the context was cancelled during
-// shutdown. The process does not re-enter the election afterwards:
-// leaderelection.RunOrDie returns and run() exits, relying on the
-// container restart policy to bring up a fresh candidate.
+// shutdown. Client-go does not expose the reason to this callback, so the
+// root context identifies application-requested shutdown.
 func (c *leaderCallbacks) OnStoppedLeading() {
 	c.metrics.setLeaderGauge(0)
 	c.tracker.setLeader(false, time.Time{})
 	if c.wasLeader.Load() {
+		if c.shutdownCtx.Err() != nil {
+			slog.Info("Shutting down event processing.")
+			return
+		}
 		slog.Info("Lost leadership. Shutting down event processing.")
 		return
 	}
@@ -577,7 +582,7 @@ func run(ctx context.Context, args []string) error {
 	tracker.setCacheSynced()
 	slog.Info("Caches synced. Ready for event processing...")
 
-	callbacks := newLeaderCallbacks(tracker, prometheusLeaderCallbackMetrics{m: metrics}, id)
+	callbacks := newLeaderCallbacks(ctx, tracker, prometheusLeaderCallbackMetrics{m: metrics}, id)
 	leaderelection.RunOrDie(ctx, leaderelection.LeaderElectionConfig{
 		Lock:            lock,
 		ReleaseOnCancel: true,
