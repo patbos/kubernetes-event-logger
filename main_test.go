@@ -2205,7 +2205,7 @@ func TestLeaderCallbacksOnStartedLeading(t *testing.T) {
 	metrics := &fakeLeaderCallbackMetrics{}
 	fixedNow := time.Unix(1700000000, 0).UTC()
 
-	callbacks := newLeaderCallbacks(tracker, metrics, "test-id")
+	callbacks := newLeaderCallbacks(context.Background(), tracker, metrics, "test-id")
 	callbacks.now = func() time.Time { return fixedNow }
 
 	callbacks.OnStartedLeading(context.Background())
@@ -2243,7 +2243,7 @@ func TestLeaderCallbacksOnStoppedLeadingAfterLeading(t *testing.T) {
 	tracker := newHealthTracker()
 	metrics := &fakeLeaderCallbackMetrics{}
 
-	callbacks := newLeaderCallbacks(tracker, metrics, "test-id")
+	callbacks := newLeaderCallbacks(context.Background(), tracker, metrics, "test-id")
 	callbacks.OnStartedLeading(context.Background())
 	logs.Reset()
 
@@ -2260,11 +2260,32 @@ func TestLeaderCallbacksOnStoppedLeadingAfterLeading(t *testing.T) {
 	}
 
 	output := logs.String()
-	if !strings.Contains(output, `"msg":"Shutting down event processing."`) {
-		t.Errorf("expected shutdown log when wasLeader=true, got: %s", output)
+	if !strings.Contains(output, `"msg":"Lost leadership. Shutting down event processing."`) {
+		t.Errorf("expected lost-leadership shutdown log when wasLeader=true, got: %s", output)
 	}
-	if !strings.Contains(output, `"msg":"Lost leadership, entering standby mode."`) {
-		t.Errorf("expected lost-leadership log, got: %s", output)
+	if strings.Contains(output, "standby") {
+		t.Errorf("log must not claim standby mode; the process exits after losing leadership: %s", output)
+	}
+}
+
+func TestLeaderCallbacksOnStoppedLeadingDuringGracefulShutdown(t *testing.T) {
+	logs := captureSlog(t)
+	tracker := newHealthTracker()
+	metrics := &fakeLeaderCallbackMetrics{}
+	ctx, cancel := context.WithCancel(context.Background())
+	callbacks := newLeaderCallbacks(ctx, tracker, metrics, "test-id")
+
+	callbacks.OnStartedLeading(context.Background())
+	logs.Reset()
+	cancel()
+	callbacks.OnStoppedLeading()
+
+	output := logs.String()
+	if !strings.Contains(output, `"msg":"Shutting down event processing."`) {
+		t.Errorf("expected graceful-shutdown log when context is cancelled, got: %s", output)
+	}
+	if strings.Contains(output, "Lost leadership.") {
+		t.Errorf("graceful shutdown must not claim leadership was lost: %s", output)
 	}
 }
 
@@ -2276,7 +2297,7 @@ func TestLeaderCallbacksOnStoppedLeadingWithoutLeading(t *testing.T) {
 	tracker := newHealthTracker()
 	metrics := &fakeLeaderCallbackMetrics{}
 
-	callbacks := newLeaderCallbacks(tracker, metrics, "test-id")
+	callbacks := newLeaderCallbacks(context.Background(), tracker, metrics, "test-id")
 
 	callbacks.OnStoppedLeading()
 
@@ -2292,25 +2313,25 @@ func TestLeaderCallbacksOnStoppedLeadingWithoutLeading(t *testing.T) {
 	}
 
 	output := logs.String()
-	if strings.Contains(output, `"msg":"Shutting down event processing."`) {
+	if strings.Contains(output, "Shutting down event processing.") {
 		t.Errorf("shutdown log should NOT appear when never became leader, got: %s", output)
 	}
-	if !strings.Contains(output, `"msg":"Lost leadership, entering standby mode."`) {
-		t.Errorf("lost-leadership log should still appear, got: %s", output)
+	if !strings.Contains(output, `"msg":"Leader election stopped before leadership was acquired."`) {
+		t.Errorf("expected stopped-before-acquire log, got: %s", output)
 	}
 }
 
 func TestLeaderCallbacksFullCycle(t *testing.T) {
 	// Verifies the start-then-stop sequence as it would be invoked by
-	// client-go during a normal leadership term followed by graceful
-	// shutdown. This is the regression test for the previous racy wait()
+	// client-go during a normal leadership term followed by lease loss.
+	// This is the regression test for the previous racy wait()
 	// implementation: we now rely solely on the synchronous OnStoppedLeading
 	// path to emit the shutdown log, with no goroutine coordination.
 	logs := captureSlog(t)
 	tracker := newHealthTracker()
 	metrics := &fakeLeaderCallbackMetrics{}
 
-	callbacks := newLeaderCallbacks(tracker, metrics, "test-id")
+	callbacks := newLeaderCallbacks(context.Background(), tracker, metrics, "test-id")
 
 	callbacks.OnStartedLeading(context.Background())
 	callbacks.OnStoppedLeading()
@@ -2323,8 +2344,7 @@ func TestLeaderCallbacksFullCycle(t *testing.T) {
 	output := logs.String()
 	for _, want := range []string{
 		`"msg":"Became leader. Starting to process events."`,
-		`"msg":"Shutting down event processing."`,
-		`"msg":"Lost leadership, entering standby mode."`,
+		`"msg":"Lost leadership. Shutting down event processing."`,
 	} {
 		if !strings.Contains(output, want) {
 			t.Errorf("missing log line %q in output: %s", want, output)
@@ -2336,7 +2356,7 @@ func TestLeaderCallbacksOnNewLeader(t *testing.T) {
 	tracker := newHealthTracker()
 	metrics := &fakeLeaderCallbackMetrics{}
 
-	callbacks := newLeaderCallbacks(tracker, metrics, "self-id")
+	callbacks := newLeaderCallbacks(context.Background(), tracker, metrics, "self-id")
 
 	logs := captureSlog(t)
 	callbacks.OnNewLeader("self-id") // self - should not log
@@ -2407,7 +2427,7 @@ func TestLeaderCallbacksConcurrentRaceFree(t *testing.T) {
 	for i := 0; i < 100; i++ {
 		tracker := newHealthTracker()
 		metrics := &fakeLeaderCallbackMetrics{}
-		callbacks := newLeaderCallbacks(tracker, metrics, "test-id")
+		callbacks := newLeaderCallbacks(context.Background(), tracker, metrics, "test-id")
 
 		var wg sync.WaitGroup
 		wg.Add(2)
@@ -2421,6 +2441,26 @@ func TestLeaderCallbacksConcurrentRaceFree(t *testing.T) {
 		}()
 		wg.Wait()
 	}
+}
+
+func TestLeaderElectionExitError(t *testing.T) {
+	t.Run("cancelled context is a graceful shutdown", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		if err := leaderElectionExitError(ctx); err != nil {
+			t.Errorf("leaderElectionExitError() = %v, want nil for cancelled context", err)
+		}
+	})
+
+	t.Run("live context means the lease was lost", func(t *testing.T) {
+		err := leaderElectionExitError(context.Background())
+		if err == nil {
+			t.Fatal("leaderElectionExitError() = nil, want error when context is not cancelled")
+		}
+		if !strings.Contains(err.Error(), "leadership lease lost") {
+			t.Errorf("error = %q, want it to mention the lost lease", err.Error())
+		}
+	})
 }
 
 func TestStartHTTPServerServesOnFreePort(t *testing.T) {
